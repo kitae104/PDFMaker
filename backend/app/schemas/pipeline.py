@@ -37,6 +37,16 @@ class KeyMomentAnalysis(BaseModel):
     keyMoments: list[KeyMomentData]
 
 
+class SceneWindowSummary(BaseModel):
+    id: str
+    title: str
+    summary: str
+
+
+class SceneWindowSummaryList(BaseModel):
+    scenes: list[SceneWindowSummary]
+
+
 class LessonChapter(BaseModel):
     title: str
     learning_objectives: list[str]

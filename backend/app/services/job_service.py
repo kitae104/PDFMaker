@@ -13,7 +13,7 @@ from app.schemas.pipeline import ChapterAnalysis, KeyMomentAnalysis, LessonConte
 from app.services.document import DocumentGenerator
 from app.services.llm.providers import get_llm_provider
 from app.services.storage import StorageService
-from app.services.transcript_parser import parse_transcript_file
+from app.services.transcript_parser import normalize_transcript_segments, parse_transcript_file
 from app.services.transcription.providers import get_transcription_provider
 from app.services.video import VideoService
 from app.services.vision.providers import get_vision_provider
@@ -104,6 +104,14 @@ class JobService:
             self.update_scene_selection(job_id, moment_ids)
         runner = JobRunner(self.db)
         return runner.generate_document_draft(job_id)
+
+    def regenerate_scene_summaries(self, job_id: str) -> list[dict]:
+        job = self.db.get(Job, job_id)
+        if not job:
+            return []
+        runner = JobRunner(self.db)
+        runner.regenerate_scene_summaries(job)
+        return build_review_segments(self.db, self.storage, job)
 
     def render_pdf_from_content(self, job_id: str, content: LessonContent) -> Path:
         runner = JobRunner(self.db)
@@ -209,17 +217,21 @@ class JobRunner:
             self.video.capture_frame(source_path, 0, cover, "Opening scene")
             scenes = [(0.0, cover)]
         scenes = sorted(scenes, key=lambda item: item[0])
-        for index, (timestamp, frame_path) in enumerate(scenes, start=1):
-            chapter_start = 0.0 if index == 1 else timestamp
-            end = scenes[index][0] if index < len(scenes) else transcript.duration
-            segments = transcript_segments_between(transcript, chapter_start, end)
-            summary = summarize_segments(segments)
-            title = scene_title(segments, index)
+        windows = scene_windows_from_detected_scenes(scenes, transcript)
+        summaries = self.llm.summarize_scene_windows(windows)
+        summary_by_id = {scene.id: scene for scene in summaries.scenes}
+        for window in windows:
+            index = int(window["id"])
+            timestamp = float(window["timestamp"])
+            frame_path = Path(window["frame_path"])
+            scene_summary = summary_by_id.get(str(index))
+            title = scene_summary.title if scene_summary else window["title"]
+            summary = scene_summary.summary if scene_summary else window["summary"]
             chapter = Chapter(
                 project_id=project_id,
                 title=title,
-                start_time=chapter_start,
-                end_time=end,
+                start_time=float(window["start"]),
+                end_time=float(window["end"]),
                 summary=summary,
                 importance=8,
                 order=index,
@@ -237,6 +249,37 @@ class JobRunner:
             self.db.add(moment)
             self.db.flush()
             self.db.add(Frame(key_moment_id=moment.id, timestamp=timestamp, path=str(frame_path), score=1.0, selected=True))
+        self.db.commit()
+
+    def regenerate_scene_summaries(self, job: Job) -> None:
+        transcript = load_transcript(self.db, job)
+        rows = self.db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id).order_by(KeyMoment.timestamp).all()
+        windows = []
+        for moment in rows:
+            start = moment.chapter.start_time
+            end = moment.chapter.end_time
+            segments = transcript_segments_between(transcript, start, end)
+            windows.append(
+                {
+                    "id": moment.id,
+                    "title": moment.title,
+                    "summary": summarize_segments(segments),
+                    "start": start,
+                    "end": end,
+                    "timestamp": moment.timestamp,
+                    "segments": segments,
+                }
+            )
+        summaries = self.llm.summarize_scene_windows(windows)
+        summary_by_id = {scene.id: scene for scene in summaries.scenes}
+        for moment in rows:
+            scene_summary = summary_by_id.get(moment.id)
+            if not scene_summary:
+                continue
+            moment.title = scene_summary.title
+            moment.reason = scene_summary.summary
+            moment.chapter.title = scene_summary.title
+            moment.chapter.summary = scene_summary.summary
         self.db.commit()
 
     def _delete_existing_review(self, project_id: str) -> None:
@@ -409,7 +452,10 @@ def load_transcript(db: Session, job: Job) -> TranscriptData:
     transcript_row = db.query(Transcript).filter(Transcript.project_id == job.project_id).first()
     if not transcript_row:
         raise RuntimeError("Missing transcript")
-    return TranscriptData.model_validate_json(Path(transcript_row.content_path).read_text(encoding="utf-8"))
+    transcript = TranscriptData.model_validate_json(Path(transcript_row.content_path).read_text(encoding="utf-8"))
+    transcript.segments = normalize_transcript_segments(transcript.segments)
+    transcript.duration = transcript.segments[-1].end if transcript.segments else transcript.duration
+    return transcript
 
 
 def transcript_segments_between(transcript: TranscriptData, start: float, end: float) -> list[TranscriptSegment]:
@@ -429,6 +475,27 @@ def scene_title(segments: list[TranscriptSegment], index: int) -> str:
         if words:
             return " ".join(words[:8])[:80]
     return f"Scene {index}"
+
+
+def scene_windows_from_detected_scenes(scenes: list[tuple[float, Path]], transcript: TranscriptData) -> list[dict]:
+    windows = []
+    for index, (timestamp, frame_path) in enumerate(scenes, start=1):
+        start = 0.0 if index == 1 else timestamp
+        end = scenes[index][0] if index < len(scenes) else transcript.duration
+        segments = transcript_segments_between(transcript, start, end)
+        windows.append(
+            {
+                "id": str(index),
+                "title": scene_title(segments, index),
+                "summary": summarize_segments(segments),
+                "start": start,
+                "end": end,
+                "timestamp": timestamp,
+                "frame_path": str(frame_path),
+                "segments": segments,
+            }
+        )
+    return windows
 
 
 def build_review_segments(db: Session, storage: StorageService, job: Job) -> list[dict]:
@@ -465,7 +532,7 @@ def build_selected_windows(db: Session, job: Job, transcript: TranscriptData) ->
         start = 0.0 if index == 0 else moment.timestamp
         end = moments[index + 1].timestamp if index + 1 < len(moments) else transcript.duration
         segments = transcript_segments_between(transcript, start, end)
-        windows.append({"id": moment.id, "title": moment.title, "summary": summarize_segments(segments), "start": start, "end": end, "segments": segments})
+        windows.append({"id": moment.id, "title": moment.title, "summary": moment.reason, "start": start, "end": end, "segments": segments})
     return windows
 
 

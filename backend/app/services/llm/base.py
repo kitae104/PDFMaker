@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from app.schemas.jobs import GenerationOptions
-from app.schemas.pipeline import ChapterAnalysis, KeyMomentAnalysis, LessonContent, TranscriptData
+from app.schemas.pipeline import ChapterAnalysis, KeyMomentAnalysis, LessonContent, SceneWindowSummaryList, TranscriptData
 
 
 class LLMProvider(ABC):
@@ -35,6 +35,10 @@ class LLMProvider(ABC):
         windows: list[dict],
         options: GenerationOptions,
     ) -> LessonContent:
+        raise NotImplementedError
+
+    @abstractmethod
+    def summarize_scene_windows(self, windows: list[dict]) -> SceneWindowSummaryList:
         raise NotImplementedError
 
     @abstractmethod

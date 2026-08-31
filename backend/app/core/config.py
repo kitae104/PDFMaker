@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     stt_provider: str = "mock"
     vision_provider: str = "mock"
     openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
     gemini_api_key: str | None = None
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"

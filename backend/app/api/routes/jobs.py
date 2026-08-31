@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, UploadFile
@@ -7,10 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import AppError
-from app.models.entities import Chapter, Frame, GeneratedDocument, Job, KeyMoment, Transcript
+from app.models.entities import Chapter, Frame, GeneratedDocument, Job, KeyMoment
 from app.schemas.jobs import GenerationOptions, JobResponse, SceneSelectionRequest, YouTubeJobCreate
 from app.schemas.pipeline import LessonContent
-from app.services.job_service import JobService
+from app.services.job_service import JobService, load_transcript
 from app.services.storage import StorageService
 from app.services.youtube import analyze_youtube_url
 
@@ -132,10 +131,10 @@ def get_job(job_id: str, db: Session = Depends(get_db)) -> JobResponse:
 @router.get("/{job_id}/transcript")
 def get_transcript(job_id: str, db: Session = Depends(get_db)) -> dict:
     job = require_job(db, job_id)
-    transcript = db.query(Transcript).filter(Transcript.project_id == job.project_id).first()
-    if not transcript:
+    try:
+        return load_transcript(db, job).model_dump()
+    except RuntimeError:
         raise AppError("Transcript가 아직 생성되지 않았습니다.", 404)
-    return json.loads(Path(transcript.content_path).read_text(encoding="utf-8"))
 
 
 @router.get("/{job_id}/chapters")
@@ -164,6 +163,15 @@ def get_review_segments(job_id: str, db: Session = Depends(get_db)) -> list[dict
     segments = JobService(db).get_review_segments(job_id)
     if not segments:
         raise AppError("검토할 장면이 아직 생성되지 않았습니다.", 404)
+    return segments
+
+
+@router.post("/{job_id}/review-segments/regenerate")
+def regenerate_review_segments(job_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    require_job(db, job_id)
+    segments = JobService(db).regenerate_scene_summaries(job_id)
+    if not segments:
+        raise AppError("재생성할 장면이 없습니다.", 404)
     return segments
 
 

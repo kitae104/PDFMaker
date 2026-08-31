@@ -8,6 +8,8 @@ from app.schemas.pipeline import (
     KeyMomentData,
     LessonChapter,
     LessonContent,
+    SceneWindowSummary,
+    SceneWindowSummaryList,
     TranscriptData,
 )
 from app.services.llm.base import LLMProvider
@@ -142,6 +144,16 @@ class MockLLMProvider(LLMProvider):
             final_summary=["선택된 이미지 기준 구간들이 영상 Transcript 전체를 순서대로 커버하도록 구성되었습니다.", "각 구간은 다음 선택 이미지 전까지의 설명을 통합해 정리했습니다."],
             review_questions=["각 이미지가 나타내는 핵심 개념은 무엇인가요?", "이미지 사이의 스크립트 흐름에서 반드시 기억해야 할 내용은 무엇인가요?"],
         )
+
+    def summarize_scene_windows(self, windows: list[dict]) -> SceneWindowSummaryList:
+        scenes = []
+        for index, window in enumerate(windows, start=1):
+            segments = window.get("segments", [])
+            fallback_title = f"Scene {index}"
+            title = make_title(segments, fallback=fallback_title)
+            summary = make_summary(segments, max_chars=360, fallback="이 구간에는 추출 가능한 스크립트가 많지 않습니다.")
+            scenes.append(SceneWindowSummary(id=str(window.get("id") or index), title=title, summary=summary))
+        return SceneWindowSummaryList(scenes=scenes)
 
     def summarize(self, transcript: TranscriptData) -> str:
         sample = make_summary(transcript.segments[:24], max_chars=260, fallback="Transcript 내용이 충분하지 않습니다.")
