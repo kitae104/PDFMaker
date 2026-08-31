@@ -173,7 +173,7 @@ if (-not $SkipInstall) {
 
     $nodeModules = Join-Path $FrontendDir "node_modules"
     $packageLock = Join-Path $FrontendDir "package-lock.json"
-    if (-not (Test-Path $nodeModules) -or (Test-Path $packageLock -and (Get-Item $packageLock).LastWriteTimeUtc -gt (Get-Item $nodeModules).LastWriteTimeUtc)) {
+    if (-not (Test-Path $nodeModules) -or ((Test-Path $packageLock) -and (Get-Item $packageLock).LastWriteTimeUtc -gt (Get-Item $nodeModules).LastWriteTimeUtc)) {
         Write-Step "Installing frontend dependencies..."
         if (Test-Path $packageLock) {
             Invoke-InDirectory $FrontendDir $npm @("ci")
