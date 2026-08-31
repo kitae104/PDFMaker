@@ -9,8 +9,10 @@ const steps: JobStatus[] = [
   'ANALYZING_TRANSCRIPT',
   'SELECTING_KEY_MOMENTS',
   'CAPTURING_FRAMES',
+  'REVIEW_READY',
   'GENERATING_CONTENT',
   'GENERATING_HTML',
+  'DOCUMENT_READY',
   'GENERATING_PDF'
 ];
 
@@ -32,7 +34,7 @@ export function ProgressSteps({ job }: { job: Job }) {
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         {steps.map((step, index) => {
-          const done = job.status === 'COMPLETED' || index < currentIndex;
+          const done = job.status === 'COMPLETED' || index < currentIndex || step === 'REVIEW_READY' && ['GENERATING_CONTENT', 'GENERATING_HTML', 'DOCUMENT_READY', 'GENERATING_PDF'].includes(job.status);
           const active = step === job.status;
           return (
             <div key={step} className="flex items-center gap-2 text-sm text-slate-700">

@@ -107,6 +107,42 @@ class MockLLMProvider(LLMProvider):
             review_questions=["이 영상에서 가장 중요한 개념은 무엇인가요?", "각 Chapter의 핵심 장면은 어떤 설명과 연결되나요?"],
         )
 
+    def generate_lesson_from_scene_windows(
+        self,
+        title: str,
+        transcript: TranscriptData,
+        windows: list[dict],
+        options: GenerationOptions,
+    ) -> LessonContent:
+        lesson_chapters: list[LessonChapter] = []
+        for index, window in enumerate(windows, start=1):
+            segments = window.get("segments", [])
+            chapter_title = window.get("title") or make_title(segments, fallback=f"Scene {index}")
+            excerpt = make_summary(segments, max_chars=700, fallback=window.get("summary", ""))
+            lesson_chapters.append(
+                LessonChapter(
+                    title=f"{index}. {chapter_title}",
+                    learning_objectives=[f"{chapter_title} 구간의 핵심 내용을 설명할 수 있다."],
+                    explanation=f"선택된 이미지 이후 다음 선택 이미지 전까지의 스크립트를 통합해 정리했습니다. {excerpt}",
+                    beginner_explanation=f"쉽게 말하면, 이 부분은 '{chapter_title}' 장면에서 시작된 설명을 하나의 학습 단위로 묶은 것입니다.",
+                    key_points=make_key_points(segments),
+                    terms=[
+                        {"term": term, "definition": "이 이미지 구간의 스크립트에서 반복되거나 핵심적으로 등장한 표현입니다."}
+                        for term in extract_terms(segments)[:4]
+                    ],
+                    timestamp=format_timestamp(float(window.get("start", 0))),
+                    summary=make_summary(segments, max_chars=160, fallback=f"{chapter_title} 구간 요약"),
+                )
+            )
+        return LessonContent(
+            title=title or "AI Generated Lecture Notes",
+            overview=self.summarize(transcript),
+            learning_objectives=["장면 변화 지점을 기준으로 영상의 전체 흐름을 빠짐없이 이해한다.", "선택된 이미지와 연결된 스크립트 구간을 학습 단위로 정리한다."],
+            chapters=lesson_chapters,
+            final_summary=["선택된 이미지 기준 구간들이 영상 Transcript 전체를 순서대로 커버하도록 구성되었습니다.", "각 구간은 다음 선택 이미지 전까지의 설명을 통합해 정리했습니다."],
+            review_questions=["각 이미지가 나타내는 핵심 개념은 무엇인가요?", "이미지 사이의 스크립트 흐름에서 반드시 기억해야 할 내용은 무엇인가요?"],
+        )
+
     def summarize(self, transcript: TranscriptData) -> str:
         sample = make_summary(transcript.segments[:24], max_chars=260, fallback="Transcript 내용이 충분하지 않습니다.")
         return f"이 자료는 영상 Transcript를 바탕으로 핵심 내용을 교육용 노트 형태로 재구성합니다. {sample}"

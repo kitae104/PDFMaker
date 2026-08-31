@@ -26,6 +26,10 @@ class YouTubeJobCreate(BaseModel):
     pdf_length: str = "Auto"
 
 
+class SceneSelectionRequest(BaseModel):
+    moment_ids: list[str]
+
+
 class JobResponse(BaseModel):
     id: str
     project_id: str

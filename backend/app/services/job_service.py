@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.entities import Chapter, Frame, GeneratedDocument, Job, JobStatus, KeyMoment, Project, SourceType, Transcript
 from app.schemas.jobs import GenerationOptions
-from app.schemas.pipeline import ChapterAnalysis, KeyMomentAnalysis, TranscriptData, TranscriptSegment
+from app.schemas.pipeline import ChapterAnalysis, KeyMomentAnalysis, LessonContent, TranscriptData, TranscriptSegment
 from app.services.document import DocumentGenerator
 from app.services.llm.providers import get_llm_provider
 from app.services.storage import StorageService
@@ -33,6 +33,8 @@ STATUS_PROGRESS = {
     JobStatus.GENERATING_CONTENT: 82,
     JobStatus.GENERATING_HTML: 90,
     JobStatus.GENERATING_PDF: 96,
+    JobStatus.REVIEW_READY: 76,
+    JobStatus.DOCUMENT_READY: 92,
     JobStatus.COMPLETED: 100,
 }
 
@@ -79,6 +81,33 @@ class JobService:
         with SessionLocal() as db:
             runner = JobRunner(db)
             runner.run(job_id)
+
+    def get_review_segments(self, job_id: str) -> list[dict]:
+        job = self.db.get(Job, job_id)
+        if not job:
+            return []
+        return build_review_segments(self.db, self.storage, job)
+
+    def update_scene_selection(self, job_id: str, moment_ids: list[str]) -> list[dict]:
+        job = self.db.get(Job, job_id)
+        if not job:
+            return []
+        allowed = set(moment_ids)
+        rows = self.db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id).all()
+        for row in rows:
+            row.selected = row.id in allowed
+        self.db.commit()
+        return build_review_segments(self.db, self.storage, job)
+
+    def generate_document_draft(self, job_id: str, moment_ids: list[str] | None = None) -> LessonContent:
+        if moment_ids is not None:
+            self.update_scene_selection(job_id, moment_ids)
+        runner = JobRunner(self.db)
+        return runner.generate_document_draft(job_id)
+
+    def render_pdf_from_content(self, job_id: str, content: LessonContent) -> Path:
+        runner = JobRunner(self.db)
+        return runner.render_pdf_from_content(job_id, content)
 
 
 class JobRunner:
@@ -137,49 +166,15 @@ class JobRunner:
             self._status(job, JobStatus.ANALYZING_TRANSCRIPT)
             self.llm.analyze_transcript(transcript)
 
-            self._status(job, JobStatus.GENERATING_CHAPTERS)
-            chapters = self.llm.generate_chapters(transcript)
-            chapter_rows = self._save_chapters(project.id, chapters)
-
             self._status(job, JobStatus.SELECTING_KEY_MOMENTS)
-            moments = self.llm.select_key_moments(transcript, chapters)
-            moment_rows = self._save_moments(chapter_rows, moments)
-
             self._status(job, JobStatus.CAPTURING_FRAMES)
-            frame_rows = self._capture_frames(source_path, job_dir, moment_rows)
+            self._create_scene_review(project.id, source_path, job_dir, transcript, metadata)
 
-            self._status(job, JobStatus.GENERATING_CONTENT)
-            options = GenerationOptions.model_validate_json(job.options_json)
-            lesson = self.llm.generate_lesson_content(transcript, chapters, moments, options)
-
-            self._status(job, JobStatus.GENERATING_HTML)
-            html_path = job_dir / "html" / "lecture.html"
-            pdf_path = job_dir / "pdf" / "lecture.pdf"
-            self.document.render_html(
-                html_path,
-                lesson,
-                project={
-                    "title": project.title,
-                    "source_type": project.source_type.value,
-                    "source_url": project.source_url,
-                    "duration": metadata.get("duration"),
-                    "channel": metadata.get("channel"),
-                    "thumbnail": metadata.get("thumbnail"),
-                },
-                chapters=[self._chapter_dict(row) for row in chapter_rows],
-                moments=[self._moment_dict(row) for row in moment_rows],
-                frames=[self._frame_dict(row) for row in frame_rows],
-            )
-
-            self._status(job, JobStatus.GENERATING_PDF)
-            self.document.generate_pdf(html_path, pdf_path)
-            self.db.add(GeneratedDocument(project_id=project.id, type="pdf", html_path=str(html_path), pdf_path=str(pdf_path)))
-
-            job.status = JobStatus.COMPLETED
-            job.progress = 100
+            job.status = JobStatus.REVIEW_READY
+            job.progress = STATUS_PROGRESS[JobStatus.REVIEW_READY]
             job.completed_at = datetime.utcnow()
             self.db.commit()
-            logger.info("[JOB %s] completed", job.id)
+            logger.info("[JOB %s] review ready", job.id)
         except Exception as exc:
             logger.exception("[JOB %s] failed", job_id)
             job.status = JobStatus.FAILED
@@ -204,6 +199,124 @@ class JobRunner:
             TranscriptSegment(start=260, end=320, text="Mock Provider는 Chapter, Key Moment, HTML 미리보기, PDF 생성 흐름을 검증하기 위한 예시 콘텐츠를 생성합니다."),
         ]
         return TranscriptData(language="ko", duration=320, segments=segments)
+
+    def _create_scene_review(self, project_id: str, source_path: Path, job_dir: Path, transcript: TranscriptData, metadata: dict) -> None:
+        self._delete_existing_review(project_id)
+        duration = float(metadata.get("duration") or transcript.duration or 0)
+        scenes = self.video.detect_scene_changes(source_path, job_dir / "frames", duration)
+        if not scenes:
+            cover = job_dir / "frames" / "scene_0000.jpg"
+            self.video.capture_frame(source_path, 0, cover, "Opening scene")
+            scenes = [(0.0, cover)]
+        scenes = sorted(scenes, key=lambda item: item[0])
+        for index, (timestamp, frame_path) in enumerate(scenes, start=1):
+            chapter_start = 0.0 if index == 1 else timestamp
+            end = scenes[index][0] if index < len(scenes) else transcript.duration
+            segments = transcript_segments_between(transcript, chapter_start, end)
+            summary = summarize_segments(segments)
+            title = scene_title(segments, index)
+            chapter = Chapter(
+                project_id=project_id,
+                title=title,
+                start_time=chapter_start,
+                end_time=end,
+                summary=summary,
+                importance=8,
+                order=index,
+            )
+            self.db.add(chapter)
+            self.db.flush()
+            moment = KeyMoment(
+                chapter_id=chapter.id,
+                timestamp=timestamp,
+                title=title,
+                reason=summary,
+                importance=8,
+                selected=True,
+            )
+            self.db.add(moment)
+            self.db.flush()
+            self.db.add(Frame(key_moment_id=moment.id, timestamp=timestamp, path=str(frame_path), score=1.0, selected=True))
+        self.db.commit()
+
+    def _delete_existing_review(self, project_id: str) -> None:
+        moments = self.db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == project_id).all()
+        for moment in moments:
+            for frame in moment.frames:
+                self.db.delete(frame)
+            self.db.delete(moment)
+        for chapter in self.db.query(Chapter).filter(Chapter.project_id == project_id).all():
+            self.db.delete(chapter)
+        self.db.commit()
+
+    def generate_document_draft(self, job_id: str) -> LessonContent:
+        job = self.db.get(Job, job_id)
+        if not job:
+            raise RuntimeError("Missing job")
+        project = self.db.get(Project, job.project_id)
+        transcript = load_transcript(self.db, job)
+        windows = build_selected_windows(self.db, job, transcript)
+        options = GenerationOptions.model_validate_json(job.options_json)
+        self._status(job, JobStatus.GENERATING_CONTENT)
+        lesson = self.llm.generate_lesson_from_scene_windows(project.title if project else "Lecture Notes", transcript, windows, options)
+        job_dir = self.storage.job_dir(job.id)
+        content_path = job_dir / "html" / "editable_document.json"
+        content_path.parent.mkdir(parents=True, exist_ok=True)
+        content_path.write_text(lesson.model_dump_json(indent=2), encoding="utf-8")
+        self._status(job, JobStatus.GENERATING_HTML)
+        self._render_document(job, lesson)
+        job.status = JobStatus.DOCUMENT_READY
+        job.progress = STATUS_PROGRESS[JobStatus.DOCUMENT_READY]
+        self.db.commit()
+        return lesson
+
+    def render_pdf_from_content(self, job_id: str, content: LessonContent) -> Path:
+        job = self.db.get(Job, job_id)
+        if not job:
+            raise RuntimeError("Missing job")
+        job_dir = self.storage.job_dir(job.id)
+        content_path = job_dir / "html" / "editable_document.json"
+        content_path.parent.mkdir(parents=True, exist_ok=True)
+        content_path.write_text(content.model_dump_json(indent=2), encoding="utf-8")
+        self._status(job, JobStatus.GENERATING_HTML)
+        html_path, pdf_path = self._render_document(job, content)
+        self._status(job, JobStatus.GENERATING_PDF)
+        self.document.generate_pdf(html_path, pdf_path)
+        job.status = JobStatus.COMPLETED
+        job.progress = 100
+        job.completed_at = datetime.utcnow()
+        self.db.commit()
+        return pdf_path
+
+    def _render_document(self, job: Job, lesson: LessonContent) -> tuple[Path, Path]:
+        project = self.db.get(Project, job.project_id)
+        job_dir = self.storage.job_dir(job.id)
+        html_path = job_dir / "html" / "lecture.html"
+        pdf_path = job_dir / "pdf" / "lecture.pdf"
+        frames = selected_frame_dicts(self.db, self.storage, job)
+        self.document.render_html(
+            html_path,
+            lesson,
+            project={
+                "title": project.title if project else lesson.title,
+                "source_type": project.source_type.value if project else "",
+                "source_url": project.source_url if project else None,
+                "duration": None,
+                "channel": None,
+                "thumbnail": None,
+            },
+            chapters=[self._chapter_dict(row) for row in self.db.query(Chapter).filter(Chapter.project_id == job.project_id).order_by(Chapter.order).all()],
+            moments=[self._moment_dict(row) for row in self.db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id).all()],
+            frames=frames,
+        )
+        document = self.db.query(GeneratedDocument).filter(GeneratedDocument.project_id == job.project_id).first()
+        if document:
+            document.html_path = str(html_path)
+            document.pdf_path = str(pdf_path)
+        else:
+            self.db.add(GeneratedDocument(project_id=job.project_id, type="pdf", html_path=str(html_path), pdf_path=str(pdf_path)))
+        self.db.commit()
+        return html_path, pdf_path
 
     def _save_chapters(self, project_id: str, analysis: ChapterAnalysis) -> list[Chapter]:
         rows = []
@@ -290,3 +403,77 @@ def user_safe_error(exc: Exception) -> str:
     if "ffmpeg" in message.lower():
         return "영상 처리 도구를 실행하는 중 문제가 발생했습니다. FFmpeg 설치 상태를 확인해주세요."
     return "강의자료를 생성하는 중 문제가 발생했습니다. 입력 파일을 확인하거나 Mock Provider 설정으로 다시 시도해주세요."
+
+
+def load_transcript(db: Session, job: Job) -> TranscriptData:
+    transcript_row = db.query(Transcript).filter(Transcript.project_id == job.project_id).first()
+    if not transcript_row:
+        raise RuntimeError("Missing transcript")
+    return TranscriptData.model_validate_json(Path(transcript_row.content_path).read_text(encoding="utf-8"))
+
+
+def transcript_segments_between(transcript: TranscriptData, start: float, end: float) -> list[TranscriptSegment]:
+    return [segment for segment in transcript.segments if segment.end >= start and segment.start < end and segment.text.strip()]
+
+
+def summarize_segments(segments: list[TranscriptSegment], limit: int = 360) -> str:
+    text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+    if not text:
+        return "이 구간에는 추출 가능한 스크립트가 많지 않습니다."
+    return text[:limit].rstrip()
+
+
+def scene_title(segments: list[TranscriptSegment], index: int) -> str:
+    for segment in segments:
+        words = segment.text.strip().split()
+        if words:
+            return " ".join(words[:8])[:80]
+    return f"Scene {index}"
+
+
+def build_review_segments(db: Session, storage: StorageService, job: Job) -> list[dict]:
+    rows = db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id).order_by(KeyMoment.timestamp).all()
+    result = []
+    for moment in rows:
+        frame = next((item for item in moment.frames if item.selected), moment.frames[0] if moment.frames else None)
+        result.append(
+            {
+                "id": moment.id,
+                "title": moment.title,
+                "summary": moment.reason,
+                "start": moment.chapter.start_time,
+                "end": moment.chapter.end_time,
+                "selected": moment.selected,
+                "frame": None
+                if not frame
+                else {
+                    "id": frame.id,
+                    "url": f"/storage/{storage.relative(Path(frame.path))}",
+                    "timestamp": frame.timestamp,
+                },
+            }
+        )
+    return result
+
+
+def build_selected_windows(db: Session, job: Job, transcript: TranscriptData) -> list[dict]:
+    moments = db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id, KeyMoment.selected.is_(True)).order_by(KeyMoment.timestamp).all()
+    if not moments:
+        moments = db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id).order_by(KeyMoment.timestamp).all()
+    windows = []
+    for index, moment in enumerate(moments):
+        start = 0.0 if index == 0 else moment.timestamp
+        end = moments[index + 1].timestamp if index + 1 < len(moments) else transcript.duration
+        segments = transcript_segments_between(transcript, start, end)
+        windows.append({"id": moment.id, "title": moment.title, "summary": summarize_segments(segments), "start": start, "end": end, "segments": segments})
+    return windows
+
+
+def selected_frame_dicts(db: Session, storage: StorageService, job: Job) -> list[dict]:
+    moments = db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id, KeyMoment.selected.is_(True)).order_by(KeyMoment.timestamp).all()
+    frames = []
+    for moment in moments:
+        frame = next((item for item in moment.frames if item.selected), moment.frames[0] if moment.frames else None)
+        if frame:
+            frames.append({"path": frame.path, "timestamp": frame.timestamp, "selected": True, "url": f"/storage/{storage.relative(Path(frame.path))}"})
+    return frames

@@ -15,8 +15,10 @@ export function statusLabel(status: string) {
     GENERATING_CHAPTERS: 'Chapter 생성',
     SELECTING_KEY_MOMENTS: '중요 장면 선정',
     CAPTURING_FRAMES: '화면 캡처',
+    REVIEW_READY: '장면 검토 준비',
     GENERATING_CONTENT: '강의자료 작성',
     GENERATING_HTML: 'HTML 생성',
+    DOCUMENT_READY: '편집 초안 준비',
     GENERATING_PDF: 'PDF 생성',
     COMPLETED: '완료',
     FAILED: '실패'

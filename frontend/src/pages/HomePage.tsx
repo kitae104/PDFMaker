@@ -37,14 +37,14 @@ export function HomePage() {
   }, [setRecentJobs]);
 
   useEffect(() => {
-    if (!activeJob || ['COMPLETED', 'FAILED'].includes(activeJob.status)) return;
+    if (!activeJob || ['REVIEW_READY', 'DOCUMENT_READY', 'COMPLETED', 'FAILED'].includes(activeJob.status)) return;
     const id = window.setInterval(async () => {
       const jobs = await listJobs();
       setRecentJobs(jobs);
       const current = jobs.find((job) => job.id === activeJob.id);
       if (current) {
         setActiveJob(current);
-        if (current.status === 'COMPLETED') navigate(`/results/${current.id}`);
+        if (['REVIEW_READY', 'DOCUMENT_READY', 'COMPLETED'].includes(current.status)) navigate(`/results/${current.id}`);
       }
     }, 1800);
     return () => window.clearInterval(id);

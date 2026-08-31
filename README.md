@@ -1,6 +1,6 @@
 # AI Video Lecture Note Generator
 
-Turn videos into structured learning materials. Phase 1 focuses on local MP4 upload, mock or real provider-ready transcript generation, chapter/key moment analysis, frame capture, HTML preview, and PDF download.
+Turn videos into structured learning materials. The current workflow extracts scene-change images, summarizes transcript windows between scenes, lets the user choose the images to include, generates an editable lecture document, and downloads a PDF from the edited content.
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ VISION_PROVIDER=mock
 
 This lets the full pipeline run without external API keys. If FFmpeg is not installed, mock mode still creates placeholder educational frames so the preview and PDF flow can be tested end to end.
 
-YouTube URL input is also wired for local testing. It validates the URL, reads public oEmbed metadata when available, and generates mock-based lecture notes without automatically downloading the source video.
+YouTube URL input is also wired for local testing. It validates the URL, reads public oEmbed metadata when available, builds the scene review step, and then creates an editable document draft before PDF download.
 
 ## Optional FFmpeg
 

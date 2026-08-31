@@ -21,6 +21,10 @@
 - [x] Jinja2 HTML
 - [x] PDF generation adapter
 - [x] Results page
+- [x] Scene-change review workflow
+- [x] User scene selection
+- [x] Editable document draft
+- [x] PDF generation from edited content
 - [x] Progress UI
 - [x] Transcript file upload job
 - [x] Transcript paste-to-job flow
@@ -31,7 +35,7 @@
 - [x] YouTube URL validation
 - [x] YouTube metadata analysis through public oEmbed with fallback
 - [x] YouTube Job creation
-- [x] YouTube mock transcript to PDF pipeline
+- [x] YouTube transcript-to-scene-review pipeline
 - [ ] Caption discovery integration
 - [ ] User-assisted source acquisition workflow
 

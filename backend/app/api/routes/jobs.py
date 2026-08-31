@@ -1,14 +1,15 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import AppError
 from app.models.entities import Chapter, Frame, GeneratedDocument, Job, KeyMoment, Transcript
-from app.schemas.jobs import GenerationOptions, JobResponse, YouTubeJobCreate
+from app.schemas.jobs import GenerationOptions, JobResponse, SceneSelectionRequest, YouTubeJobCreate
+from app.schemas.pipeline import LessonContent
 from app.services.job_service import JobService
 from app.services.storage import StorageService
 from app.services.youtube import analyze_youtube_url
@@ -155,6 +156,47 @@ def get_moments(job_id: str, db: Session = Depends(get_db)) -> list[dict]:
         {"id": row.id, "title": row.title, "timestamp": row.timestamp, "reason": row.reason, "importance": row.importance, "selected": row.selected}
         for row in rows
     ]
+
+
+@router.get("/{job_id}/review-segments")
+def get_review_segments(job_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    require_job(db, job_id)
+    segments = JobService(db).get_review_segments(job_id)
+    if not segments:
+        raise AppError("검토할 장면이 아직 생성되지 않았습니다.", 404)
+    return segments
+
+
+@router.post("/{job_id}/selection")
+def update_scene_selection(payload: SceneSelectionRequest, job_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    require_job(db, job_id)
+    return JobService(db).update_scene_selection(job_id, payload.moment_ids)
+
+
+@router.post("/{job_id}/document-draft", response_model=LessonContent)
+def create_document_draft(
+    job_id: str,
+    payload: SceneSelectionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> LessonContent:
+    require_job(db, job_id)
+    return JobService(db).generate_document_draft(job_id, payload.moment_ids if payload else None)
+
+
+@router.get("/{job_id}/document-draft", response_model=LessonContent)
+def get_document_draft(job_id: str, db: Session = Depends(get_db)) -> LessonContent:
+    require_job(db, job_id)
+    path = StorageService().job_dir(job_id) / "html" / "editable_document.json"
+    if not path.exists():
+        raise AppError("편집 가능한 문서 초안이 아직 생성되지 않았습니다.", 404)
+    return LessonContent.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+@router.post("/{job_id}/pdf")
+def create_pdf_from_edited_content(job_id: str, content: LessonContent, db: Session = Depends(get_db)) -> FileResponse:
+    require_job(db, job_id)
+    path = JobService(db).render_pdf_from_content(job_id, content)
+    return FileResponse(path, media_type="application/pdf", filename="lecture-notes.pdf")
 
 
 @router.get("/{job_id}/frames")

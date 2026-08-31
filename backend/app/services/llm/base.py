@@ -28,5 +28,15 @@ class LLMProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def generate_lesson_from_scene_windows(
+        self,
+        title: str,
+        transcript: TranscriptData,
+        windows: list[dict],
+        options: GenerationOptions,
+    ) -> LessonContent:
+        raise NotImplementedError
+
+    @abstractmethod
     def summarize(self, transcript: TranscriptData) -> str:
         raise NotImplementedError

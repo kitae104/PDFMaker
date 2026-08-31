@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Chapter, Frame, HealthResponse, Job, KeyMoment, Transcript, YouTubeMetadata } from '../types';
+import type { Chapter, Frame, HealthResponse, Job, KeyMoment, LessonContent, ReviewSegment, Transcript, YouTubeMetadata } from '../types';
 
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '');
 const backendBaseUrl = configuredApiBaseUrl?.replace(/\/api$/, '');
@@ -90,5 +90,30 @@ export async function getMoments(jobId: string) {
 
 export async function getFrames(jobId: string) {
   const { data } = await api.get<Frame[]>(`/jobs/${jobId}/frames`);
+  return data;
+}
+
+export async function getReviewSegments(jobId: string) {
+  const { data } = await api.get<ReviewSegment[]>(`/jobs/${jobId}/review-segments`);
+  return data;
+}
+
+export async function updateSceneSelection(jobId: string, momentIds: string[]) {
+  const { data } = await api.post<ReviewSegment[]>(`/jobs/${jobId}/selection`, { moment_ids: momentIds });
+  return data;
+}
+
+export async function generateDocumentDraft(jobId: string, momentIds: string[]) {
+  const { data } = await api.post<LessonContent>(`/jobs/${jobId}/document-draft`, { moment_ids: momentIds });
+  return data;
+}
+
+export async function getDocumentDraft(jobId: string) {
+  const { data } = await api.get<LessonContent>(`/jobs/${jobId}/document-draft`);
+  return data;
+}
+
+export async function generateEditedPdf(jobId: string, content: LessonContent) {
+  const { data } = await api.post<Blob>(`/jobs/${jobId}/pdf`, content, { responseType: 'blob' });
   return data;
 }
