@@ -19,18 +19,18 @@ const steps: JobStatus[] = [
 export function ProgressSteps({ job }: { job: Job }) {
   const currentIndex = steps.indexOf(job.status);
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-indigo-700">{statusLabel(job.status)}</p>
+          <p className="text-sm font-black text-emerald-700">{statusLabel(job.status)}</p>
           <h3 className="text-lg font-bold text-slate-950">{job.project_title}</h3>
         </div>
         <div className="text-right text-sm text-slate-500">
-          <strong className="text-2xl text-indigo-700">{job.progress}%</strong>
+          <strong className="text-2xl text-[#145947]">{job.progress}%</strong>
         </div>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-        <div className="h-full rounded-full bg-indigo-600 transition-all" style={{ width: `${job.progress}%` }} />
+      <div className="h-2 overflow-hidden rounded-full bg-stone-100">
+        <div className="h-full rounded-full bg-[#145947] transition-all" style={{ width: `${job.progress}%` }} />
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         {steps.map((step, index) => {
@@ -43,7 +43,7 @@ export function ProgressSteps({ job }: { job: Job }) {
               ) : done ? (
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
               ) : active ? (
-                <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                <Loader2 className="h-4 w-4 animate-spin text-[#145947]" />
               ) : (
                 <Circle className="h-4 w-4 text-slate-300" />
               )}

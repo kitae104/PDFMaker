@@ -1,23 +1,36 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, Download, FileText, Film, Link as LinkIcon, Search, UploadCloud, Wand2 } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowRight,
+  CheckCircle2,
+  Download,
+  FileText,
+  Film,
+  Link as LinkIcon,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  UploadCloud,
+  Wand2
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { analyzeYouTube, apiUrl, createTranscriptJob, createVideoJob, createYouTubeJob, getHealth, listJobs } from '../api/client';
 import { ProgressSteps } from '../components/ProgressSteps';
 import { useJobStore } from '../stores/jobs';
 import { statusLabel } from '../utils/format';
-import type { YouTubeMetadata } from '../types';
+import type { Job, YouTubeMetadata } from '../types';
 
 type InputMode = 'youtube' | 'video' | 'transcript';
 
 const DEFAULT_GENERATION_OPTIONS = {
-  materialType: 'Detailed Lecture',
+  materialType: '강의 교재',
   difficulty: '대학생 수준',
-  pdfLength: 'Auto'
+  pdfLength: '자동'
 };
 
 export function HomePage() {
   const [mode, setMode] = useState<InputMode>('youtube');
-  const [health, setHealth] = useState<string>('checking');
+  const [health, setHealth] = useState<string>('확인 중');
   const [file, setFile] = useState<File | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState('https://youtu.be/JKj7eTi0Axo?si=AJrOgnxr5x_fSOlP');
   const [youtubeHasRights, setYoutubeHasRights] = useState(true);
@@ -32,7 +45,7 @@ export function HomePage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    getHealth().then((data) => setHealth(`${data.app_name} / ${data.database}`)).catch(() => setHealth('backend offline'));
+    getHealth().then((data) => setHealth(`${data.database} 연결됨`)).catch(() => setHealth('서버 연결 필요'));
     listJobs().then(setRecentJobs).catch(() => undefined);
   }, [setRecentJobs]);
 
@@ -66,7 +79,7 @@ export function HomePage() {
           ? await createYouTubeJob(youtubeUrl, { ...DEFAULT_GENERATION_OPTIONS, hasRights: youtubeHasRights })
           : mode === 'transcript'
             ? await createTranscriptJob(
-                { file: transcriptFile, text: transcriptText, title: transcriptFile?.name.replace(/\.[^/.]+$/, '') || 'Transcript Lecture Notes' },
+                { file: transcriptFile, text: transcriptText, title: transcriptFile?.name.replace(/\.[^/.]+$/, '') || '스크립트 기반 강의자료' },
                 DEFAULT_GENERATION_OPTIONS
               )
           : file
@@ -87,162 +100,152 @@ export function HomePage() {
       setYoutubeMetadata(metadata);
     } catch {
       setYoutubeMetadata(null);
-      setYoutubeMessage('YouTube URL을 확인하지 못했습니다. 주소와 권한 체크를 확인해주세요.');
+      setYoutubeMessage('영상 주소를 확인하지 못했습니다. 주소와 권한 체크 상태를 다시 확인해주세요.');
     } finally {
       setIsAnalyzingYoutube(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-indigo-50 text-ink">
-      <section className="mx-auto grid max-w-6xl gap-8 px-5 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-14">
-        <div className="flex flex-col justify-center">
-          <span className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-indigo-100 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm">
-            <Wand2 className="h-4 w-4" /> AI education workflow
-          </span>
-          <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-normal text-slate-950 sm:text-6xl">
-            AI Video Lecture Note Generator
-          </h1>
-          <p className="mt-5 max-w-2xl text-xl font-semibold text-slate-700">Turn videos into structured learning materials.</p>
-          <p className="mt-4 max-w-2xl text-lg text-slate-600">
-            영상 하나로 핵심 내용, 중요한 화면, 설명, PDF를 자동 생성합니다.
-          </p>
-          <div className="mt-6 rounded-lg border border-blue-100 bg-white/80 p-4 text-sm text-slate-600 shadow-sm">
-            업로드하거나 분석하는 콘텐츠를 사용할 적절한 권한이 있는지 확인해주세요. 생성된 자료를 공개 또는 배포하는 경우 원본 콘텐츠의 저작권 및 플랫폼 이용조건을 확인해야 합니다.
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xl shadow-indigo-100/60">
-          <div className="mb-5 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-indigo-700">영상 입력 방법</p>
-              <h2 className="text-2xl font-bold text-slate-950">Generate lecture notes</h2>
-            </div>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{health}</span>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-100 p-1">
-            <ModeButton active={mode === 'youtube'} label="YouTube URL" icon={<LinkIcon />} onClick={() => setMode('youtube')} />
-            <ModeButton active={mode === 'video'} label="Video Upload" icon={<Film />} onClick={() => setMode('video')} />
-            <ModeButton active={mode === 'transcript'} label="Transcript" icon={<FileText />} onClick={() => setMode('transcript')} />
-          </div>
-
-          <div className="mt-5">
-            {mode === 'youtube' ? (
-              <YouTubePanel
-                url={youtubeUrl}
-                hasRights={youtubeHasRights}
-                metadata={youtubeMetadata}
-                message={youtubeMessage}
-                isAnalyzing={isAnalyzingYoutube}
-                onUrlChange={(nextUrl) => {
-                  setYoutubeUrl(nextUrl);
-                  setYoutubeMetadata(null);
-                }}
-                onRightsChange={setYoutubeHasRights}
-                onAnalyze={confirmYouTube}
-              />
-            ) : null}
-            {mode === 'video' ? (
-              <div>
-                <div
-                  className={`flex min-h-48 flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition ${
-                    isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50'
-                  }`}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    setIsDragging(true);
-                  }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    setIsDragging(false);
-                    setFile(event.dataTransfer.files?.[0] ?? null);
-                  }}
-                >
-                  <UploadCloud className="mb-3 h-9 w-9 text-indigo-600" />
-                  <p className="font-semibold text-slate-900">Drag & Drop</p>
-                  <p className="mb-4 text-sm text-slate-500">mp4, mov, mkv, webm</p>
-                  <label className="inline-flex cursor-pointer items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-indigo-700">
-                    파일 선택
-                    <input className="hidden" type="file" accept=".mp4,.mov,.mkv,.webm" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-                  </label>
-                  {file ? <p className="mt-3 text-sm font-medium text-indigo-700">{file.name}</p> : null}
+    <main className="min-h-screen bg-[#f2f0e9] text-ink">
+      <section className="relative overflow-hidden bg-[#101712] text-white">
+        <div className="absolute inset-0 bg-[url('/hero-lecture-workflow.png')] bg-cover bg-center opacity-80" />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(13,20,15,0.94)_0%,rgba(13,20,15,0.78)_43%,rgba(13,20,15,0.28)_100%)]" />
+        <div className="relative mx-auto grid min-h-[760px] max-w-7xl gap-10 px-5 py-8 lg:grid-cols-[0.92fr_1.08fr] lg:px-8 lg:py-10">
+          <div className="flex flex-col justify-between">
+            <nav className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/15 bg-white/10 shadow-2xl backdrop-blur">
+                  <Wand2 className="h-5 w-5 text-amber-200" />
+                </div>
+                <div>
+                  <p className="text-sm font-black tracking-normal text-white">강의자료 메이커</p>
+                  <p className="text-xs font-semibold text-white/55">영상에서 PDF까지</p>
                 </div>
               </div>
-            ) : null}
-            {mode === 'transcript' ? (
-              <TranscriptPanel
-                text={transcriptText}
-                file={transcriptFile}
-                onTextChange={setTranscriptText}
-                onFileChange={setTranscriptFile}
-              />
-            ) : null}
+              <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-bold text-emerald-100 backdrop-blur">
+                {health}
+              </span>
+            </nav>
+
+            <div className="max-w-2xl pb-10 pt-16 lg:pb-20">
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-bold text-emerald-100 shadow-2xl backdrop-blur">
+                <Sparkles className="h-4 w-4" />
+                장면, 요약, 편집본을 한 번에
+              </span>
+              <h1 className="mt-7 break-keep text-4xl font-black leading-[1.12] tracking-normal text-white sm:text-6xl xl:text-7xl">
+                영상을 교재로 바꿉니다
+              </h1>
+              <p className="mt-6 max-w-xl break-keep text-lg font-medium leading-8 text-stone-100/85">
+                유튜브, 영상 파일, 스크립트를 넣으면 화면 전환 장면을 추출하고 자연스러운 한국어 요약과 편집 가능한 PDF 초안을 만듭니다.
+              </p>
+              <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                <Metric label="장면 검토" value="자동 추출" />
+                <Metric label="문장 보정" value="요약 정리" />
+                <Metric label="출력 형식" value="PDF" />
+              </div>
+            </div>
           </div>
 
-          <div className="mt-5 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
-            <p className="flex items-center gap-2 text-sm font-bold text-emerald-800">
-              <CheckCircle2 className="h-4 w-4" /> 기본 생성 설정 적용
-            </p>
-            <p className="mt-2 text-sm leading-relaxed text-emerald-900">
-              유튜브 내용에 대한 강의 교재, 대학생 수준, 내용에 따른 자동 길이로 생성합니다. 핵심 장면, 용어 정리, 마지막 요약, Timestamp, 출처, 학습 목표, 복습 문제는 자동 포함됩니다.
-            </p>
-          </div>
+          <div className="flex items-center justify-center lg:justify-end">
+            <div className="w-full max-w-[620px] rounded-lg border border-white/18 bg-white/92 p-4 text-slate-950 shadow-[0_30px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-5">
+              <div className="rounded-lg border border-stone-200 bg-[#fbfaf6] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] sm:p-5">
+                <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-emerald-700">새 강의자료 만들기</p>
+                    <h2 className="mt-1 text-2xl font-black tracking-normal text-slate-950">자료 입력</h2>
+                  </div>
+                  <span className="rounded-full bg-amber-100 px-3 py-1.5 text-xs font-black text-amber-800">기본값 적용</span>
+                </div>
 
-          <button
-            onClick={startJob}
-            disabled={!canStart}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 font-bold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-          >
-            <Wand2 className="h-5 w-5" /> {isUploading ? '작업 생성 중' : '강의자료 생성 시작'}
-          </button>
+                <div className="grid grid-cols-3 gap-2 rounded-lg border border-stone-200 bg-stone-100 p-1">
+                  <ModeButton active={mode === 'youtube'} label="주소" icon={<LinkIcon />} onClick={() => setMode('youtube')} />
+                  <ModeButton active={mode === 'video'} label="파일" icon={<Film />} onClick={() => setMode('video')} />
+                  <ModeButton active={mode === 'transcript'} label="대본" icon={<FileText />} onClick={() => setMode('transcript')} />
+                </div>
+
+                <div className="mt-5">
+                  {mode === 'youtube' ? (
+                    <YouTubePanel
+                      url={youtubeUrl}
+                      hasRights={youtubeHasRights}
+                      metadata={youtubeMetadata}
+                      message={youtubeMessage}
+                      isAnalyzing={isAnalyzingYoutube}
+                      onUrlChange={(nextUrl) => {
+                        setYoutubeUrl(nextUrl);
+                        setYoutubeMetadata(null);
+                      }}
+                      onRightsChange={setYoutubeHasRights}
+                      onAnalyze={confirmYouTube}
+                    />
+                  ) : null}
+                  {mode === 'video' ? (
+                    <VideoPanel file={file} isDragging={isDragging} onFileChange={setFile} onDraggingChange={setIsDragging} />
+                  ) : null}
+                  {mode === 'transcript' ? (
+                    <TranscriptPanel
+                      text={transcriptText}
+                      file={transcriptFile}
+                      onTextChange={setTranscriptText}
+                      onFileChange={setTranscriptFile}
+                    />
+                  ) : null}
+                </div>
+
+                <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="flex items-center gap-2 text-sm font-black text-emerald-900">
+                    <ShieldCheck className="h-4 w-4" />
+                    생성 설정
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-emerald-950/80">
+                    강의 교재, 대학생 수준, 자동 분량으로 생성합니다. 핵심 장면, 용어 정리, 마지막 요약, 시간 표시, 출처, 학습 목표, 복습 질문을 포함합니다.
+                  </p>
+                </div>
+
+                <button
+                  onClick={startJob}
+                  disabled={!canStart}
+                  className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#145947] px-5 py-3 font-black text-white shadow-[0_16px_35px_rgba(20,89,71,0.28)] transition hover:-translate-y-0.5 hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500 disabled:shadow-none"
+                >
+                  <Wand2 className="h-5 w-5" />
+                  {isUploading ? '작업 생성 중' : '강의자료 생성 시작'}
+                  {!isUploading ? <ArrowRight className="h-5 w-5" /> : null}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-6 px-5 pb-12 lg:grid-cols-[1fr_1fr]">
-        {activeJob ? <ProgressSteps job={activeJob} /> : null}
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-xl font-bold text-slate-950">최근 작업</h2>
-          <div className="grid gap-3">
-            {recentJobs.length ? recentJobs.map((job) => (
-              <article key={job.id} className="rounded-lg border border-slate-100 p-4 hover:border-indigo-200 hover:bg-indigo-50">
-                <div className="flex items-center justify-between gap-3">
-                  <strong className="text-slate-900">{job.project_title}</strong>
-                  <span className="text-sm font-semibold text-indigo-700">{statusLabel(job.status)}</span>
-                </div>
-                <div className="mt-2 h-1.5 rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-600" style={{ width: `${job.progress}%` }} /></div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/results/${job.id}`)}
-                    className="rounded-md bg-white px-3 py-2 text-sm font-bold text-indigo-700 shadow-sm ring-1 ring-indigo-100 hover:bg-indigo-50"
-                  >
-                    결과 보기
-                  </button>
-                  {job.status === 'COMPLETED' ? (
-                    <a
-                      href={apiUrl(`/jobs/${job.id}/pdf`)}
-                      className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm hover:bg-indigo-700"
-                    >
-                      <Download className="h-4 w-4" /> PDF 다운로드
-                    </a>
-                  ) : null}
-                </div>
-              </article>
-            )) : <p className="text-sm text-slate-500">아직 생성한 자료가 없습니다.</p>}
-          </div>
-        </div>
+      <section className="mx-auto grid max-w-7xl gap-6 px-5 py-10 lg:grid-cols-[0.95fr_1.05fr] lg:px-8">
+        {activeJob ? <ProgressSteps job={activeJob} /> : <WorkflowPreview />}
+        <RecentJobs jobs={recentJobs} onOpen={(jobId) => navigate(`/results/${jobId}`)} />
       </section>
     </main>
   );
 }
 
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/12 bg-white/10 px-4 py-3 shadow-2xl backdrop-blur">
+      <p className="text-xs font-bold text-stone-200/70">{label}</p>
+      <p className="mt-1 text-lg font-black text-white">{value}</p>
+    </div>
+  );
+}
+
 function ModeButton({ active, label, icon, onClick }: { active: boolean; label: string; icon: ReactNode; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-bold ${active ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-black transition sm:gap-2 sm:px-3 sm:text-sm ${
+        active ? 'bg-white text-[#145947] shadow-sm' : 'text-slate-500 hover:bg-white/60 hover:text-slate-900'
+      }`}
+    >
       <span className="[&>svg]:h-4 [&>svg]:w-4">{icon}</span>
-      <span className="hidden sm:inline">{label}</span>
+      <span>{label}</span>
     </button>
   );
 }
@@ -267,53 +270,97 @@ function YouTubePanel({
   onAnalyze: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
-      <label className="text-sm font-semibold text-slate-700">YouTube URL</label>
-      <div className="mt-2 flex gap-2">
+    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <label className="text-sm font-black text-slate-700">유튜브 영상 주소</label>
+      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
         <input
           value={url}
           onChange={(event) => onUrlChange(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg border border-indigo-100 px-3 py-2 outline-none focus:border-indigo-500"
+          className="min-h-11 min-w-0 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 outline-none transition focus:border-emerald-600 focus:bg-white"
           placeholder="https://www.youtube.com/watch?v=..."
         />
         <button
           type="button"
           onClick={onAnalyze}
           disabled={!url.trim() || !hasRights || isAnalyzing}
-          className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-bold text-indigo-700 shadow-sm ring-1 ring-indigo-100 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-slate-400"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-500"
         >
-          <Search className="h-4 w-4" /> {isAnalyzing ? '확인 중' : '영상 확인'}
+          <Search className="h-4 w-4" />
+          {isAnalyzing ? '확인 중' : '영상 확인'}
         </button>
       </div>
-      <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
+      <label className="mt-3 flex items-start gap-2 text-sm leading-6 text-slate-700">
         <input
           type="checkbox"
           checked={hasRights}
           onChange={(event) => onRightsChange(event.target.checked)}
-          className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600"
+          className="mt-1 h-4 w-4 rounded border-stone-300 text-emerald-700"
         />
-        본 영상의 분석 및 자료 생성에 필요한 권한을 가지고 있습니다.
+        이 영상을 분석하고 강의자료를 만들 권한이 있습니다.
       </label>
       {message ? (
         <p className="mt-3 flex items-center gap-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">
-          <AlertCircle className="h-4 w-4" /> {message}
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {message}
         </p>
       ) : null}
       {metadata ? (
-        <div className="mt-4 grid gap-4 rounded-lg bg-white p-3 shadow-sm sm:grid-cols-[132px_1fr]">
-          <img src={metadata.thumbnail} alt={metadata.title} className="aspect-video w-full rounded-md object-cover" />
+        <div className="mt-4 grid gap-4 rounded-lg border border-stone-100 bg-[#fbfaf6] p-3 sm:grid-cols-[132px_1fr]">
+          <img src={metadata.thumbnail} alt={metadata.title} className="aspect-video w-full rounded-md object-cover shadow-md" />
           <div>
-            <p className="flex items-center gap-2 text-sm font-bold text-emerald-700"><CheckCircle2 className="h-4 w-4" /> 영상 확인 완료</p>
-            <h3 className="mt-1 font-bold text-slate-950">{metadata.title}</h3>
+            <p className="flex items-center gap-2 text-sm font-black text-emerald-700">
+              <CheckCircle2 className="h-4 w-4" />
+              영상 확인 완료
+            </p>
+            <h3 className="mt-1 font-black leading-snug text-slate-950">{metadata.title}</h3>
             <p className="mt-1 text-sm text-slate-500">{metadata.channel}</p>
-            <p className="mt-2 text-xs leading-relaxed text-slate-500">{metadata.policyNote}</p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">{metadata.policyNote}</p>
           </div>
         </div>
       ) : (
-        <p className="mt-3 text-sm text-indigo-900">
-          기본값은 유튜브 내용에 대한 강의 교재, 대학생 수준, PDF 길이 Auto입니다. 영상 확인 없이도 권한 체크와 URL이 있으면 Mock 기반 생성 흐름을 시작할 수 있습니다.
+        <p className="mt-3 text-sm leading-6 text-slate-500">
+          주소와 권한 확인만으로 시작할 수 있습니다. 공개 자막이 있으면 자막 기반으로, 제한이 있으면 로컬 검증 흐름으로 진행합니다.
         </p>
       )}
+    </div>
+  );
+}
+
+function VideoPanel({
+  file,
+  isDragging,
+  onFileChange,
+  onDraggingChange
+}: {
+  file: File | null;
+  isDragging: boolean;
+  onFileChange: (file: File | null) => void;
+  onDraggingChange: (dragging: boolean) => void;
+}) {
+  return (
+    <div
+      className={`flex min-h-56 flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition ${
+        isDragging ? 'border-emerald-600 bg-emerald-50' : 'border-stone-200 bg-white'
+      }`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDraggingChange(true);
+      }}
+      onDragLeave={() => onDraggingChange(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDraggingChange(false);
+        onFileChange(event.dataTransfer.files?.[0] ?? null);
+      }}
+    >
+      <UploadCloud className="mb-3 h-10 w-10 text-[#145947]" />
+      <p className="font-black text-slate-900">영상 파일을 끌어오세요</p>
+      <p className="mb-4 text-sm text-slate-500">mp4, mov, mkv, webm 형식을 지원합니다.</p>
+      <label className="inline-flex min-h-10 cursor-pointer items-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-slate-800">
+        파일 선택
+        <input className="hidden" type="file" accept=".mp4,.mov,.mkv,.webm" onChange={(event) => onFileChange(event.target.files?.[0] ?? null)} />
+      </label>
+      {file ? <p className="mt-3 max-w-full break-words text-sm font-bold text-emerald-700">{file.name}</p> : null}
     </div>
   );
 }
@@ -330,22 +377,86 @@ function TranscriptPanel({
   onFileChange: (file: File | null) => void;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <label className="text-sm font-semibold text-slate-700">Transcript Upload</label>
+    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <label className="text-sm font-black text-slate-700">스크립트 파일</label>
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <label className="inline-flex cursor-pointer items-center rounded-lg bg-white px-4 py-2 text-sm font-bold text-indigo-700 shadow-sm ring-1 ring-slate-200 hover:bg-indigo-50">
+        <label className="inline-flex min-h-10 cursor-pointer items-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-slate-800">
           파일 선택
           <input className="hidden" type="file" accept=".txt,.srt,.vtt" onChange={(event) => onFileChange(event.target.files?.[0] ?? null)} />
         </label>
-        {file ? <span className="text-sm font-semibold text-indigo-700">{file.name}</span> : <span className="text-sm text-slate-500">txt, srt, vtt 지원</span>}
+        {file ? <span className="max-w-full break-words text-sm font-bold text-emerald-700">{file.name}</span> : <span className="text-sm text-slate-500">txt, srt, vtt 지원</span>}
       </div>
       <textarea
         value={text}
         onChange={(event) => onTextChange(event.target.value)}
-        className="mt-3 min-h-36 w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-500"
-        placeholder="Transcript를 직접 붙여넣어도 됩니다."
+        className="mt-3 min-h-40 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 leading-6 outline-none transition focus:border-emerald-600 focus:bg-white"
+        placeholder="스크립트를 직접 붙여넣어도 됩니다."
       />
-      <p className="mt-3 text-sm text-slate-500">Timestamp가 있는 SRT/VTT는 시간을 유지하고, 일반 텍스트는 자동으로 시간 구간을 만들어 강의자료로 변환합니다.</p>
+      <p className="mt-3 text-sm leading-6 text-slate-500">시간 정보가 있는 SRT/VTT는 시간을 유지하고, 일반 텍스트는 자동으로 구간을 나눕니다.</p>
+    </div>
+  );
+}
+
+function WorkflowPreview() {
+  const items = [
+    ['1', '장면 추출', '화면 전환을 기준으로 핵심 이미지를 고릅니다.'],
+    ['2', '문장 정리', '겹친 자막과 어색한 표현을 자연스럽게 다듬습니다.'],
+    ['3', '교재 생성', '선택한 장면으로 편집 가능한 PDF 초안을 만듭니다.']
+  ];
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-black text-emerald-700">작업 흐름</p>
+      <h2 className="mt-1 text-xl font-black text-slate-950">영상에서 교재까지</h2>
+      <div className="mt-5 grid gap-3">
+        {items.map(([step, title, body]) => (
+          <div key={step} className="grid grid-cols-[44px_1fr] gap-3 rounded-lg border border-stone-100 bg-[#fbfaf6] p-4">
+            <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#145947] text-sm font-black text-white">{step}</span>
+            <div>
+              <p className="font-black text-slate-900">{title}</p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">{body}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecentJobs({ jobs, onOpen }: { jobs: Job[]; onOpen: (jobId: string) => void }) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-4 text-xl font-black text-slate-950">최근 작업</h2>
+      <div className="grid gap-3">
+        {jobs.length ? jobs.map((job) => (
+          <article key={job.id} className="rounded-lg border border-stone-100 bg-[#fbfaf6] p-4 transition hover:border-emerald-200 hover:bg-emerald-50/40">
+            <div className="flex items-center justify-between gap-3">
+              <strong className="min-w-0 break-words text-slate-900">{job.project_title}</strong>
+              <span className="shrink-0 text-sm font-black text-emerald-700">{statusLabel(job.status)}</span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-200">
+              <div className="h-full rounded-full bg-[#145947] transition-all" style={{ width: `${job.progress}%` }} />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onOpen(job.id)}
+                className="rounded-md bg-white px-3 py-2 text-sm font-black text-[#145947] shadow-sm ring-1 ring-emerald-100 transition hover:bg-emerald-50"
+              >
+                결과 보기
+              </button>
+              {job.status === 'COMPLETED' ? (
+                <a
+                  href={apiUrl(`/jobs/${job.id}/pdf`)}
+                  className="inline-flex items-center gap-2 rounded-md bg-[#145947] px-3 py-2 text-sm font-black text-white shadow-sm transition hover:bg-[#0f4639]"
+                >
+                  <Download className="h-4 w-4" />
+                  PDF 다운로드
+                </a>
+              ) : null}
+            </div>
+          </article>
+        )) : <p className="text-sm text-slate-500">아직 생성한 자료가 없습니다.</p>}
+      </div>
     </div>
   );
 }

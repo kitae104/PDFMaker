@@ -60,7 +60,7 @@ export async function createTranscriptJob(input: { file: File | null; text: stri
   const form = new FormData();
   if (input.file) form.append('file', input.file);
   if (input.text.trim()) form.append('transcript_text', input.text.trim());
-  form.append('title', input.title || 'Transcript Lecture Notes');
+  form.append('title', input.title || '스크립트 기반 강의자료');
   form.append('material_type', options.materialType);
   form.append('difficulty', options.difficulty);
   form.append('pdf_length', options.pdfLength);

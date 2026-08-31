@@ -202,19 +202,19 @@ export function ResultsPage() {
   }
 
   if (!job || !jobId) {
-    return <main className="min-h-screen bg-slate-50 p-8 text-slate-600">결과를 불러오는 중입니다.</main>;
+    return <main className="min-h-screen bg-[#f2f0e9] p-8 text-slate-600">결과를 불러오는 중입니다.</main>;
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-ink">
-      <header className="border-b border-slate-200 bg-white">
+    <main className="min-h-screen bg-[#f2f0e9] text-ink">
+      <header className="border-b border-stone-200 bg-[#fbfaf6]/95 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
-          <Link to="/" className="font-bold text-indigo-700">AI Video Lecture Note Generator</Link>
+          <Link to="/" className="font-black text-[#145947]">강의자료 메이커</Link>
           <button
             type="button"
             onClick={downloadEditedPdf}
             disabled={!content || isDownloadingPdf}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300"
           >
             {isDownloadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             수정본 PDF 다운로드
@@ -223,9 +223,9 @@ export function ResultsPage() {
       </header>
 
       <section className="mx-auto max-w-6xl px-5 py-8">
-        <div className="mb-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-6 rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center gap-4">
-            <div className="flex h-20 w-32 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700">
+            <div className="flex h-20 w-32 items-center justify-center rounded-lg bg-emerald-50 text-[#145947]">
               <Film className="h-8 w-8" />
             </div>
             <div>
@@ -239,11 +239,11 @@ export function ResultsPage() {
         {errorMessage ? <p className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p> : null}
 
         {readyForReview ? (
-          <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-wrap gap-1 border-b border-slate-200 p-2">
+          <div className="rounded-lg border border-stone-200 bg-white shadow-sm">
+            <div className="flex flex-wrap gap-1 border-b border-stone-200 bg-[#fbfaf6] p-2">
               {(['review', 'editor', 'preview', 'transcript'] as Tab[]).map((item) => (
-                <button key={item} onClick={() => setTab(item)} className={`rounded-md px-4 py-2 text-sm font-bold ${tab === item ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-                  {item === 'review' ? '장면 선택' : item === 'editor' ? '문서 편집' : item === 'preview' ? '미리보기' : 'Transcript'}
+                <button key={item} onClick={() => setTab(item)} className={`rounded-md px-4 py-2 text-sm font-black ${tab === item ? 'bg-[#145947] text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>
+                  {item === 'review' ? '장면 선택' : item === 'editor' ? '문서 편집' : item === 'preview' ? '미리보기' : '스크립트'}
                 </button>
               ))}
             </div>
@@ -260,7 +260,7 @@ export function ResultsPage() {
                       type="button"
                       onClick={createDraft}
                       disabled={!selectedIds.length || isGeneratingDraft}
-                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300"
                     >
                       {isGeneratingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePenLine className="h-4 w-4" />}
                       선택 내용으로 문서 초안 생성
@@ -268,9 +268,9 @@ export function ResultsPage() {
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     {reviewSegments.map((segment, index) => (
-                      <article key={segment.id} className={`rounded-lg border p-4 ${segment.selected ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-200 bg-white'}`}>
+                      <article key={segment.id} className={`rounded-lg border p-4 transition ${segment.selected ? 'border-emerald-200 bg-emerald-50/40' : 'border-stone-200 bg-white'}`}>
                         <button type="button" onClick={() => toggleSegment(segment.id)} className="mb-3 inline-flex items-center gap-2 text-sm font-bold text-slate-800">
-                          {segment.selected ? <CheckSquare className="h-5 w-5 text-indigo-600" /> : <Square className="h-5 w-5 text-slate-400" />}
+                          {segment.selected ? <CheckSquare className="h-5 w-5 text-[#145947]" /> : <Square className="h-5 w-5 text-slate-400" />}
                           {index + 1}. {formatTimestamp(segment.start)} - {formatTimestamp(segment.end)}
                         </button>
                         {segment.frame ? (
@@ -316,7 +316,7 @@ export function ResultsPage() {
                     <StringListEditor title="마지막 정리" items={content.final_summary} onChange={(index, value) => updateTopList('final_summary', index, value)} onAdd={() => addTopListItem('final_summary')} onRemove={(index) => removeTopListItem('final_summary', index)} />
                     <StringListEditor title="복습 질문" items={content.review_questions} onChange={(index, value) => updateTopList('review_questions', index, value)} onAdd={() => addTopListItem('review_questions')} onRemove={(index) => removeTopListItem('review_questions', index)} />
                     <div className="flex justify-end">
-                      <button type="button" onClick={downloadEditedPdf} disabled={isDownloadingPdf} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                      <button type="button" onClick={downloadEditedPdf} disabled={isDownloadingPdf} className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-5 py-3 font-black text-white hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300">
                         {isDownloadingPdf ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
                         수정본 PDF 다운로드
                       </button>
@@ -329,7 +329,7 @@ export function ResultsPage() {
 
               {tab === 'preview' ? (
                 content ? (
-                  <iframe title="Document Preview" src={apiUrl(`/jobs/${jobId}/preview`)} className="h-[760px] w-full rounded-lg border border-slate-200 bg-white" />
+                  <iframe title="문서 미리보기" src={apiUrl(`/jobs/${jobId}/preview`)} className="h-[760px] w-full rounded-lg border border-stone-200 bg-white" />
                 ) : (
                   <EmptyEditor onCreate={createDraft} disabled={!selectedIds.length || isGeneratingDraft} loading={isGeneratingDraft} />
                 )
@@ -338,8 +338,8 @@ export function ResultsPage() {
               {tab === 'transcript' ? (
                 <div className="grid gap-3">
                   {transcript?.segments.map((segment) => (
-                    <div key={`${segment.start}-${segment.end}`} className="rounded-lg bg-slate-50 p-3">
-                      <span className="font-bold text-indigo-700">{formatTimestamp(segment.start)}</span>
+                    <div key={`${segment.start}-${segment.end}`} className="rounded-lg bg-[#fbfaf6] p-3">
+                      <span className="font-bold text-[#145947]">{formatTimestamp(segment.start)}</span>
                       <p className="mt-1 text-slate-700">{segment.text}</p>
                     </div>
                   ))}
@@ -355,10 +355,10 @@ export function ResultsPage() {
 
 function EmptyEditor({ onCreate, disabled, loading }: { onCreate: () => void; disabled: boolean; loading: boolean }) {
   return (
-    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-      <FilePenLine className="mx-auto h-10 w-10 text-indigo-600" />
+    <div className="rounded-lg border border-dashed border-stone-300 bg-[#fbfaf6] p-8 text-center">
+      <FilePenLine className="mx-auto h-10 w-10 text-[#145947]" />
       <p className="mt-3 font-bold text-slate-900">선택된 장면으로 문서 초안을 만들 수 있습니다.</p>
-      <button type="button" onClick={onCreate} disabled={disabled} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+      <button type="button" onClick={onCreate} disabled={disabled} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#145947] px-4 py-2 text-sm font-black text-white hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300">
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePenLine className="h-4 w-4" />}
         문서 초안 생성
       </button>
@@ -370,7 +370,7 @@ function EditorField({ label, value, onChange }: { label: string; value: string;
   return (
     <label className="block">
       <span className="text-sm font-bold text-slate-700">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-500" />
+      <input value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-lg border border-stone-200 px-3 py-2 outline-none focus:border-emerald-600" />
     </label>
   );
 }
@@ -379,7 +379,7 @@ function EditorTextarea({ label, value, onChange }: { label: string; value: stri
   return (
     <label className="mt-4 block">
       <span className="text-sm font-bold text-slate-700">{label}</span>
-      <textarea value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 min-h-28 w-full rounded-lg border border-slate-200 px-3 py-2 leading-relaxed outline-none focus:border-indigo-500" />
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 min-h-28 w-full rounded-lg border border-stone-200 px-3 py-2 leading-relaxed outline-none focus:border-emerald-600" />
     </label>
   );
 }
@@ -401,12 +401,12 @@ function StringListEditor({
     <div className="mt-4">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h3 className="text-sm font-bold text-slate-700">{title}</h3>
-        <button type="button" onClick={onAdd} className="rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-200">추가</button>
+        <button type="button" onClick={onAdd} className="rounded-md bg-stone-100 px-3 py-1 text-xs font-bold text-slate-700 hover:bg-stone-200">추가</button>
       </div>
       <div className="grid gap-2">
         {items.map((item, index) => (
           <div key={`${title}-${index}`} className="grid gap-2 sm:grid-cols-[1fr_auto]">
-            <input value={item} onChange={(event) => onChange(index, event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-500" />
+            <input value={item} onChange={(event) => onChange(index, event.target.value)} className="rounded-lg border border-stone-200 px-3 py-2 outline-none focus:border-emerald-600" />
             <button type="button" onClick={() => onRemove(index)} className="rounded-md px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50">삭제</button>
           </div>
         ))}
@@ -420,7 +420,7 @@ function TermEditor({ chapter, onChange }: { chapter: LessonChapter; onChange: (
     <div className="mt-4">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h3 className="text-sm font-bold text-slate-700">주요 용어</h3>
-        <button type="button" onClick={() => onChange([...chapter.terms, { term: '', definition: '' }])} className="rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-200">추가</button>
+        <button type="button" onClick={() => onChange([...chapter.terms, { term: '', definition: '' }])} className="rounded-md bg-stone-100 px-3 py-1 text-xs font-bold text-slate-700 hover:bg-stone-200">추가</button>
       </div>
       <div className="grid gap-2">
         {chapter.terms.map((term, index) => (
@@ -428,13 +428,13 @@ function TermEditor({ chapter, onChange }: { chapter: LessonChapter; onChange: (
             <input
               value={term.term}
               onChange={(event) => onChange(chapter.terms.map((item, itemIndex) => itemIndex === index ? { ...item, term: event.target.value } : item))}
-              className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-500"
+              className="rounded-lg border border-stone-200 px-3 py-2 outline-none focus:border-emerald-600"
               placeholder="용어"
             />
             <input
               value={term.definition}
               onChange={(event) => onChange(chapter.terms.map((item, itemIndex) => itemIndex === index ? { ...item, definition: event.target.value } : item))}
-              className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-500"
+              className="rounded-lg border border-stone-200 px-3 py-2 outline-none focus:border-emerald-600"
               placeholder="설명"
             />
             <button type="button" onClick={() => onChange(chapter.terms.filter((_, itemIndex) => itemIndex !== index))} className="rounded-md px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50">삭제</button>
