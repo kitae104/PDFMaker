@@ -152,8 +152,17 @@ class JobRunner:
             elif project.source_type == SourceType.YOUTUBE:
                 metadata = analyze_youtube_url(project.source_url or "")
                 self._status(job, JobStatus.TRANSCRIBING)
-                transcript = fetch_youtube_transcript(project.source_url or "") or self._youtube_transcript(project.title, project.source_url or "", metadata)
-                source_path = download_youtube_video(project.source_url or "", job_dir / "source")
+                try:
+                    transcript = fetch_youtube_transcript(project.source_url or "")
+                except Exception:
+                    logger.exception("[JOB %s] failed to fetch YouTube transcript; using fallback transcript", job.id)
+                    transcript = None
+                transcript = transcript or self._youtube_transcript(project.title, project.source_url or "", metadata)
+                try:
+                    source_path = download_youtube_video(project.source_url or "", job_dir / "source")
+                except Exception:
+                    logger.exception("[JOB %s] failed to download YouTube video; using placeholder source", job.id)
+                    source_path = None
                 if source_path is None:
                     source_path = job_dir / "source" / "youtube-placeholder.mp4"
                     source_path.write_bytes(b"youtube placeholder")
