@@ -1,0 +1,2 @@
+Select educationally useful key moments from transcript chapters.
+Prefer timestamps that explain diagrams, transitions, definitions, or examples.

@@ -1,0 +1,2 @@
+Create Korean lecture notes grounded in the transcript.
+If supplemental explanation is necessary, label it as 보충 설명.

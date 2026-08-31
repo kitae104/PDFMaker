@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ content.title }}</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", Arial, sans-serif;
+      color: #172033;
+      line-height: 1.65;
+      margin: 0;
+      background: #f7fbff;
+    }
+    .page {
+      background: #fff;
+      min-height: 100vh;
+      padding: 48px;
+    }
+    .cover {
+      min-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      border-bottom: 5px solid #4f7cff;
+    }
+    h1 { font-size: 42px; line-height: 1.15; margin: 0 0 20px; color: #16245a; }
+    h2 { font-size: 26px; margin: 44px 0 16px; color: #1e3a8a; }
+    h3 { font-size: 20px; margin: 28px 0 10px; color: #1d4ed8; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 12px; font-weight: 700; }
+    .callout { border-left: 5px solid #4f7cff; background: #eff6ff; padding: 14px 18px; border-radius: 8px; margin: 16px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .frame { width: 100%; border-radius: 8px; border: 1px solid #bfdbfe; margin: 12px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    th, td { border: 1px solid #dbeafe; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eff6ff; color: #1e3a8a; }
+    footer { margin-top: 48px; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+    .chapter { break-inside: avoid; page-break-inside: avoid; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <section class="page cover">
+    <span class="badge">AI Generated Lecture Notes</span>
+    <h1>{{ content.title }}</h1>
+      <p><strong>영상 제목:</strong> {{ project.title }}</p>
+      {% if project.channel %}<p><strong>채널:</strong> {{ project.channel }}</p>{% endif %}
+      {% if project.source_url %}<p><strong>URL:</strong> {{ project.source_url }}</p>{% endif %}
+    <p><strong>자료 생성:</strong> {{ app_name }}</p>
+    <p><strong>생성일:</strong> 자동 생성</p>
+  </section>
+
+  <section class="page">
+    <h2>영상 개요</h2>
+    <div class="callout">{{ content.overview }}</div>
+    <h3>학습 목표</h3>
+    <ul>{% for goal in content.learning_objectives %}<li>{{ goal }}</li>{% endfor %}</ul>
+    <h3>목차</h3>
+    <ol>{% for chapter in content.chapters %}<li>{{ chapter.title }}</li>{% endfor %}</ol>
+
+    {% for chapter in content.chapters %}
+      <article class="chapter">
+        <h2>{{ chapter.title }}</h2>
+        <span class="badge">Source: {{ chapter.timestamp }}</span>
+        {% set selected = frames | selectattr("selected") | list %}
+        {% if selected[loop.index0] is defined %}
+          <img class="frame" src="{{ selected[loop.index0].url }}" alt="핵심 장면" />
+        {% endif %}
+        <h3>학습 목표</h3>
+        <ul>{% for goal in chapter.learning_objectives %}<li>{{ goal }}</li>{% endfor %}</ul>
+        <h3>개념 설명</h3>
+        <p>{{ chapter.explanation }}</p>
+        <h3>쉽게 이해하기</h3>
+        <div class="callout">{{ chapter.beginner_explanation }}</div>
+        <h3>핵심 포인트</h3>
+        <ul>{% for point in chapter.key_points %}<li>{{ point }}</li>{% endfor %}</ul>
+        <h3>주요 용어</h3>
+        <table>
+          <thead><tr><th>용어</th><th>설명</th></tr></thead>
+          <tbody>{% for item in chapter.terms %}<tr><td>{{ item.term }}</td><td>{{ item.definition }}</td></tr>{% endfor %}</tbody>
+        </table>
+        <h3>한 줄 정리</h3>
+        <p>{{ chapter.summary }}</p>
+      </article>
+    {% endfor %}
+
+    <h2>마지막 정리</h2>
+    <ul>{% for item in content.final_summary %}<li>{{ item }}</li>{% endfor %}</ul>
+    <h3>복습 질문</h3>
+    <ol>{% for question in content.review_questions %}<li>{{ question }}</li>{% endfor %}</ol>
+    <footer>
+      Source Video: {{ project.title }} / {{ project.source_type }}{% if project.source_url %} / {{ project.source_url }}{% endif %}
+    </footer>
+  </section>
+</body>
+</html>

@@ -1,0 +1,1 @@
+Summarize the transcript with timestamps and avoid claims unsupported by source text.

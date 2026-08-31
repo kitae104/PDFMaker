@@ -1,0 +1,16 @@
+.env
+.vercel/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+*.tsbuildinfo
+node_modules/
+dist/
+build/
+storage/
+tmp/
+*.log
+.DS_Store
