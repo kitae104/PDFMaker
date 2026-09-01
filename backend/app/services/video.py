@@ -1,4 +1,5 @@
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -6,6 +7,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app.core.config import settings
 from app.core.exceptions import AppError
 
 
@@ -137,22 +139,22 @@ class VideoService:
         output_dir: Path,
         duration: float,
         threshold: float = 0.35,
-        max_scenes: int = 12,
+        max_scenes: int | None = None,
     ) -> list[tuple[float, Path]]:
         output_dir.mkdir(parents=True, exist_ok=True)
+        scene_count = max_scenes or scene_count_for_duration(duration)
         ffmpeg = self.ffmpeg_path()
         if ffmpeg and input_path.exists() and input_path.stat().st_size > 1024:
             pattern = output_dir / "scene_%04d.jpg"
-            max_events = max(max_scenes * 12, 96)
+            detection_gap = scene_detection_gap(duration, scene_count)
+            select_expr = f"gt(scene,{threshold})*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,{detection_gap}))"
             cmd = [
                 ffmpeg,
                 "-y",
                 "-i",
                 str(input_path),
                 "-vf",
-                f"select='gt(scene,{threshold})',scale=1280:-1,showinfo",
-                "-frames:v",
-                str(max_events),
+                f"select='{select_expr}',scale=1280:-1,showinfo",
                 "-vsync",
                 "vfr",
                 str(pattern),
@@ -163,12 +165,11 @@ class VideoService:
                 files = sorted(output_dir.glob("scene_*.jpg"))
                 scenes = [(timestamps[index] if index < len(timestamps) else 0.0, file) for index, file in enumerate(files)]
                 if scenes:
-                    filtered = filter_scene_spacing(scenes, duration, max_scenes)
-                    return filtered[:max_scenes]
+                    return filter_scene_spacing(scenes, duration, scene_count)
             except subprocess.CalledProcessError:
                 pass
 
-        return self.sample_frames(input_path, output_dir, duration, max_scenes)
+        return self.sample_frames(input_path, output_dir, duration, scene_count)
 
     def sample_frames(self, input_path: Path, output_dir: Path, duration: float, count: int) -> list[tuple[float, Path]]:
         effective_duration = max(duration or 0, 300)
@@ -203,6 +204,18 @@ def format_timestamp(seconds: float) -> str:
     return f"{minutes:02d}:{sec:02d}"
 
 
+def scene_count_for_duration(duration: float) -> int:
+    effective_duration = max(duration or 0, settings.scene_review_interval_seconds * settings.scene_review_min_scenes)
+    target = math.ceil(effective_duration / settings.scene_review_interval_seconds)
+    return max(settings.scene_review_min_scenes, min(settings.scene_review_max_scenes, target))
+
+
+def scene_detection_gap(duration: float, scene_count: int) -> float:
+    effective_duration = max(duration or 0, settings.scene_review_interval_seconds * settings.scene_review_min_scenes)
+    target_interval = effective_duration / max(scene_count, 1)
+    return round(max(5.0, min(15.0, target_interval * 0.5)), 2)
+
+
 def filter_scene_spacing(scenes: list[tuple[float, Path]], duration: float, max_scenes: int) -> list[tuple[float, Path]]:
     if not scenes:
         return []
@@ -214,9 +227,22 @@ def filter_scene_spacing(scenes: list[tuple[float, Path]], duration: float, max_
     for timestamp, path in scenes:
         if not filtered or timestamp - filtered[-1][0] >= min_gap:
             filtered.append((timestamp, path))
-        if len(filtered) >= max_scenes:
-            break
+    if filtered and filtered[-1] != scenes[-1] and scenes[-1][0] > filtered[-1][0]:
+        if scenes[-1][0] - filtered[-1][0] >= min_gap * 0.5:
+            filtered.append(scenes[-1])
+    if len(filtered) > max_scenes:
+        return evenly_sample_scenes(filtered, max_scenes)
     if len(filtered) >= min(4, max_scenes):
         return filtered
-    step = max(len(scenes) / max_scenes, 1)
-    return [scenes[min(round(index * step), len(scenes) - 1)] for index in range(min(max_scenes, len(scenes)))]
+    return evenly_sample_scenes(scenes, max_scenes)
+
+
+def evenly_sample_scenes(scenes: list[tuple[float, Path]], count: int) -> list[tuple[float, Path]]:
+    if count <= 0:
+        return []
+    if len(scenes) <= count:
+        return scenes
+    if count == 1:
+        return [scenes[0]]
+    step = (len(scenes) - 1) / (count - 1)
+    return [scenes[round(index * step)] for index in range(count)]

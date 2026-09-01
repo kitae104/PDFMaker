@@ -107,8 +107,8 @@ export function HomePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f2f0e9] text-ink">
-      <section className="relative overflow-hidden bg-[#101712] text-white">
+    <main className="min-h-screen bg-[#eeeae0] text-ink">
+      <section className="relative overflow-hidden bg-[#101712] text-white shadow-[0_28px_70px_rgba(15,23,18,0.28)]">
         <div className="absolute inset-0 bg-[url('/hero-lecture-workflow.png')] bg-cover bg-center opacity-80" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(13,20,15,0.94)_0%,rgba(13,20,15,0.78)_43%,rgba(13,20,15,0.28)_100%)]" />
         <div className="relative mx-auto grid min-h-[760px] max-w-7xl gap-10 px-5 py-8 lg:grid-cols-[0.92fr_1.08fr] lg:px-8 lg:py-10">
@@ -148,8 +148,8 @@ export function HomePage() {
           </div>
 
           <div className="flex items-center justify-center lg:justify-end">
-            <div className="w-full max-w-[620px] rounded-lg border border-white/18 bg-white/92 p-4 text-slate-950 shadow-[0_30px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-5">
-              <div className="rounded-lg border border-stone-200 bg-[#fbfaf6] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] sm:p-5">
+            <div className="w-full max-w-[620px] rounded-lg border border-white/25 bg-white/92 p-4 text-slate-950 shadow-[0_34px_90px_rgba(0,0,0,0.48),0_2px_0_rgba(255,255,255,0.4)_inset] backdrop-blur-xl sm:p-5">
+              <div className="rounded-lg border border-stone-200 bg-[#fbfaf6] p-4 shadow-[0_16px_38px_rgba(66,55,35,0.12),inset_0_1px_0_rgba(255,255,255,0.95)] sm:p-5">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-black text-emerald-700">새 강의자료 만들기</p>
@@ -193,7 +193,7 @@ export function HomePage() {
                   ) : null}
                 </div>
 
-                <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_10px_24px_rgba(20,89,71,0.08)]">
                   <p className="flex items-center gap-2 text-sm font-black text-emerald-900">
                     <ShieldCheck className="h-4 w-4" />
                     생성 설정
@@ -228,7 +228,7 @@ export function HomePage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/12 bg-white/10 px-4 py-3 shadow-2xl backdrop-blur">
+    <div className="rounded-lg border border-white/12 bg-white/10 px-4 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.18)] backdrop-blur">
       <p className="text-xs font-bold text-stone-200/70">{label}</p>
       <p className="mt-1 text-lg font-black text-white">{value}</p>
     </div>
@@ -270,7 +270,7 @@ function YouTubePanel({
   onAnalyze: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_12px_28px_rgba(66,55,35,0.08),inset_0_1px_0_rgba(255,255,255,0.95)]">
       <label className="text-sm font-black text-slate-700">유튜브 영상 주소</label>
       <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
         <input
@@ -305,7 +305,7 @@ function YouTubePanel({
         </p>
       ) : null}
       {metadata ? (
-        <div className="mt-4 grid gap-4 rounded-lg border border-stone-100 bg-[#fbfaf6] p-3 sm:grid-cols-[132px_1fr]">
+        <div className="mt-4 grid gap-4 rounded-lg border border-stone-100 bg-[#fbfaf6] p-3 shadow-[0_10px_22px_rgba(66,55,35,0.08)] sm:grid-cols-[132px_1fr]">
           <img src={metadata.thumbnail} alt={metadata.title} className="aspect-video w-full rounded-md object-cover shadow-md" />
           <div>
             <p className="flex items-center gap-2 text-sm font-black text-emerald-700">
@@ -340,7 +340,7 @@ function VideoPanel({
   return (
     <div
       className={`flex min-h-56 flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition ${
-        isDragging ? 'border-emerald-600 bg-emerald-50' : 'border-stone-200 bg-white'
+        isDragging ? 'border-emerald-600 bg-emerald-50 shadow-[0_18px_36px_rgba(20,89,71,0.14)]' : 'border-stone-200 bg-white shadow-[0_12px_28px_rgba(66,55,35,0.08),inset_0_1px_0_rgba(255,255,255,0.95)]'
       }`}
       onDragOver={(event) => {
         event.preventDefault();
@@ -377,7 +377,7 @@ function TranscriptPanel({
   onFileChange: (file: File | null) => void;
 }) {
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-[0_12px_28px_rgba(66,55,35,0.08),inset_0_1px_0_rgba(255,255,255,0.95)]">
       <label className="text-sm font-black text-slate-700">스크립트 파일</label>
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <label className="inline-flex min-h-10 cursor-pointer items-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-slate-800">
@@ -404,13 +404,13 @@ function WorkflowPreview() {
     ['3', '교재 생성', '선택한 장면으로 편집 가능한 PDF 초안을 만듭니다.']
   ];
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-[0_18px_45px_rgba(66,55,35,0.11),inset_0_1px_0_rgba(255,255,255,0.95)]">
       <p className="text-sm font-black text-emerald-700">작업 흐름</p>
       <h2 className="mt-1 text-xl font-black text-slate-950">영상에서 교재까지</h2>
       <div className="mt-5 grid gap-3">
         {items.map(([step, title, body]) => (
-          <div key={step} className="grid grid-cols-[44px_1fr] gap-3 rounded-lg border border-stone-100 bg-[#fbfaf6] p-4">
-            <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#145947] text-sm font-black text-white">{step}</span>
+          <div key={step} className="grid grid-cols-[44px_1fr] gap-3 rounded-lg border border-stone-100 bg-[#fbfaf6] p-4 shadow-[0_10px_24px_rgba(66,55,35,0.07)]">
+            <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#145947] text-sm font-black text-white shadow-[0_10px_18px_rgba(20,89,71,0.28)]">{step}</span>
             <div>
               <p className="font-black text-slate-900">{title}</p>
               <p className="mt-1 text-sm leading-6 text-slate-500">{body}</p>
@@ -423,12 +423,13 @@ function WorkflowPreview() {
 }
 
 function RecentJobs({ jobs, onOpen }: { jobs: Job[]; onOpen: (jobId: string) => void }) {
+  const visibleJobs = jobs.slice(0, 3);
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-[0_18px_45px_rgba(66,55,35,0.11),inset_0_1px_0_rgba(255,255,255,0.95)]">
       <h2 className="mb-4 text-xl font-black text-slate-950">최근 작업</h2>
       <div className="grid gap-3">
-        {jobs.length ? jobs.map((job) => (
-          <article key={job.id} className="rounded-lg border border-stone-100 bg-[#fbfaf6] p-4 transition hover:border-emerald-200 hover:bg-emerald-50/40">
+        {visibleJobs.length ? visibleJobs.map((job) => (
+          <article key={job.id} className="rounded-lg border border-stone-100 bg-[#fbfaf6] p-4 shadow-[0_10px_24px_rgba(66,55,35,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/40 hover:shadow-[0_16px_32px_rgba(20,89,71,0.12)]">
             <div className="flex items-center justify-between gap-3">
               <strong className="min-w-0 break-words text-slate-900">{job.project_title}</strong>
               <span className="shrink-0 text-sm font-black text-emerald-700">{statusLabel(job.status)}</span>

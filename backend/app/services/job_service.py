@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+import re
 
 from sqlalchemy.orm import Session
 
@@ -86,7 +87,11 @@ class JobService:
         job = self.db.get(Job, job_id)
         if not job:
             return []
-        return build_review_segments(self.db, self.storage, job)
+        try:
+            transcript = load_transcript(self.db, job)
+        except RuntimeError:
+            transcript = None
+        return build_review_segments(self.db, self.storage, job, transcript)
 
     def update_scene_selection(self, job_id: str, moment_ids: list[str]) -> list[dict]:
         job = self.db.get(Job, job_id)
@@ -97,7 +102,11 @@ class JobService:
         for row in rows:
             row.selected = row.id in allowed
         self.db.commit()
-        return build_review_segments(self.db, self.storage, job)
+        try:
+            transcript = load_transcript(self.db, job)
+        except RuntimeError:
+            transcript = None
+        return build_review_segments(self.db, self.storage, job, transcript)
 
     def generate_document_draft(self, job_id: str, moment_ids: list[str] | None = None) -> LessonContent:
         if moment_ids is not None:
@@ -229,6 +238,7 @@ class JobRunner:
         windows = scene_windows_from_detected_scenes(scenes, transcript)
         summaries = self.llm.summarize_scene_windows(windows)
         summary_by_id = {scene.id: scene for scene in summaries.scenes}
+        windows = remove_trailing_non_learning_windows(windows, summary_by_id, transcript.duration)
         for window in windows:
             index = int(window["id"])
             timestamp = float(window["timestamp"])
@@ -333,7 +343,14 @@ class JobRunner:
         self._status(job, JobStatus.GENERATING_HTML)
         html_path, pdf_path = self._render_document(job, content)
         self._status(job, JobStatus.GENERATING_PDF)
-        self.document.generate_pdf(html_path, pdf_path)
+        project = self.db.get(Project, job.project_id)
+        self.document.generate_pdf(
+            html_path,
+            pdf_path,
+            content=content,
+            frames=selected_frame_dicts(self.db, self.storage, job),
+            project={"title": project.title if project else content.title},
+        )
         job.status = JobStatus.COMPLETED
         job.progress = 100
         job.completed_at = datetime.utcnow()
@@ -507,11 +524,59 @@ def scene_windows_from_detected_scenes(scenes: list[tuple[float, Path]], transcr
     return windows
 
 
-def build_review_segments(db: Session, storage: StorageService, job: Job) -> list[dict]:
+TRAILING_NON_LEARNING_PATTERNS = [
+    r"다음\s*(시간|강의|영상|내용|편|회차)",
+    r"다음에\s*(보|만나)",
+    r"다음\s*내용\s*소개",
+    r"예고",
+    r"마무리\s*(인사|멘트)",
+    r"(여기까지|이상으로).{0,20}마무리",
+    r"마무리하(겠|도록)",
+    r"시청해\s*주셔서",
+    r"시청\s*감사",
+    r"구독",
+    r"좋아요",
+    r"알림\s*설정",
+    r"댓글",
+    r"subscribe",
+    r"like\s+and\s+subscribe",
+    r"thanks?\s+for\s+watching",
+]
+
+
+def remove_trailing_non_learning_windows(windows: list[dict], summaries_by_id: dict, duration: float) -> list[dict]:
+    if len(windows) <= 1:
+        return windows
+    kept = list(windows)
+    while len(kept) > 1 and is_trailing_non_learning_window(kept[-1], summaries_by_id, duration):
+        kept.pop()
+    return kept
+
+
+def is_trailing_non_learning_window(window: dict, summaries_by_id: dict, duration: float) -> bool:
+    start = float(window.get("start") or 0)
+    if duration and start < duration * 0.65:
+        return False
+
+    summary = summaries_by_id.get(str(window.get("id") or ""))
+    segments = window.get("segments", [])
+    text_parts = [
+        str(window.get("title") or ""),
+        str(window.get("summary") or ""),
+        getattr(summary, "title", "") if summary else "",
+        getattr(summary, "summary", "") if summary else "",
+        " ".join(segment.text for segment in segments[-8:] if segment.text.strip()),
+    ]
+    text = re.sub(r"\s+", " ", " ".join(text_parts)).lower()
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in TRAILING_NON_LEARNING_PATTERNS)
+
+
+def build_review_segments(db: Session, storage: StorageService, job: Job, transcript: TranscriptData | None = None) -> list[dict]:
     rows = db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id).order_by(KeyMoment.timestamp).all()
     result = []
     for moment in rows:
         frame = next((item for item in moment.frames if item.selected), moment.frames[0] if moment.frames else None)
+        segments = transcript_segments_between(transcript, moment.chapter.start_time, moment.chapter.end_time) if transcript else []
         result.append(
             {
                 "id": moment.id,
@@ -519,6 +584,7 @@ def build_review_segments(db: Session, storage: StorageService, job: Job) -> lis
                 "summary": moment.reason,
                 "start": moment.chapter.start_time,
                 "end": moment.chapter.end_time,
+                "segments": segments,
                 "selected": moment.selected,
                 "frame": None
                 if not frame
@@ -529,7 +595,9 @@ def build_review_segments(db: Session, storage: StorageService, job: Job) -> lis
                 },
             }
         )
-    return result
+    if transcript:
+        result = remove_trailing_non_learning_windows(result, {}, transcript.duration)
+    return [{key: value for key, value in item.items() if key != "segments"} for item in result]
 
 
 def build_selected_windows(db: Session, job: Job, transcript: TranscriptData) -> list[dict]:

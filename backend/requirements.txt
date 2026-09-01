@@ -10,6 +10,7 @@ imagehash==4.3.2
 imageio-ffmpeg==0.6.0
 playwright==1.49.1
 reportlab==4.2.5
+pypdf==5.1.0
 pytest==8.3.4
 httpx==0.28.1
 yt-dlp>=2024.12.23

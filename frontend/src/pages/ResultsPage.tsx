@@ -202,19 +202,19 @@ export function ResultsPage() {
   }
 
   if (!job || !jobId) {
-    return <main className="min-h-screen bg-[#f2f0e9] p-8 text-slate-600">결과를 불러오는 중입니다.</main>;
+    return <main className="min-h-screen bg-[#eeeae0] p-8 text-slate-600">결과를 불러오는 중입니다.</main>;
   }
 
   return (
-    <main className="min-h-screen bg-[#f2f0e9] text-ink">
-      <header className="border-b border-stone-200 bg-[#fbfaf6]/95 shadow-sm backdrop-blur">
+    <main className="min-h-screen bg-[#eeeae0] text-ink">
+      <header className="border-b border-stone-200 bg-[#fbfaf6]/95 shadow-[0_10px_28px_rgba(66,55,35,0.08)] backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
           <Link to="/" className="font-black text-[#145947]">강의자료 메이커</Link>
           <button
             type="button"
             onClick={downloadEditedPdf}
             disabled={!content || isDownloadingPdf}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-4 py-2 text-sm font-black text-white shadow-[0_12px_24px_rgba(20,89,71,0.22)] transition hover:-translate-y-0.5 hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300 disabled:shadow-none"
           >
             {isDownloadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             수정본 PDF 다운로드
@@ -223,9 +223,9 @@ export function ResultsPage() {
       </header>
 
       <section className="mx-auto max-w-6xl px-5 py-8">
-        <div className="mb-6 rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+        <div className="mb-6 rounded-lg border border-stone-200 bg-white p-5 shadow-[0_18px_42px_rgba(66,55,35,0.1),inset_0_1px_0_rgba(255,255,255,0.95)]">
           <div className="flex flex-wrap items-center gap-4">
-            <div className="flex h-20 w-32 items-center justify-center rounded-lg bg-emerald-50 text-[#145947]">
+            <div className="flex h-20 w-32 items-center justify-center rounded-lg bg-emerald-50 text-[#145947] shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_12px_24px_rgba(20,89,71,0.1)]">
               <Film className="h-8 w-8" />
             </div>
             <div>
@@ -239,10 +239,10 @@ export function ResultsPage() {
         {errorMessage ? <p className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p> : null}
 
         {readyForReview ? (
-          <div className="rounded-lg border border-stone-200 bg-white shadow-sm">
+          <div className="rounded-lg border border-stone-200 bg-white shadow-[0_22px_54px_rgba(66,55,35,0.12),inset_0_1px_0_rgba(255,255,255,0.95)]">
             <div className="flex flex-wrap gap-1 border-b border-stone-200 bg-[#fbfaf6] p-2">
               {(['review', 'editor', 'preview', 'transcript'] as Tab[]).map((item) => (
-                <button key={item} onClick={() => setTab(item)} className={`rounded-md px-4 py-2 text-sm font-black ${tab === item ? 'bg-[#145947] text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>
+                <button key={item} onClick={() => setTab(item)} className={`rounded-md px-4 py-2 text-sm font-black transition ${tab === item ? 'bg-[#145947] text-white shadow-[0_8px_16px_rgba(20,89,71,0.22)]' : 'text-slate-600 hover:bg-white hover:shadow-sm'}`}>
                   {item === 'review' ? '장면 선택' : item === 'editor' ? '문서 편집' : item === 'preview' ? '미리보기' : '스크립트'}
                 </button>
               ))}
@@ -260,7 +260,7 @@ export function ResultsPage() {
                       type="button"
                       onClick={createDraft}
                       disabled={!selectedIds.length || isGeneratingDraft}
-                      className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300"
+                      className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-4 py-2 text-sm font-black text-white shadow-[0_12px_24px_rgba(20,89,71,0.22)] transition hover:-translate-y-0.5 hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300 disabled:shadow-none"
                     >
                       {isGeneratingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePenLine className="h-4 w-4" />}
                       선택 내용으로 문서 초안 생성
@@ -268,13 +268,13 @@ export function ResultsPage() {
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     {reviewSegments.map((segment, index) => (
-                      <article key={segment.id} className={`rounded-lg border p-4 transition ${segment.selected ? 'border-emerald-200 bg-emerald-50/40' : 'border-stone-200 bg-white'}`}>
+                      <article key={segment.id} className={`rounded-lg border p-4 shadow-[0_12px_26px_rgba(66,55,35,0.08)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_34px_rgba(20,89,71,0.11)] ${segment.selected ? 'border-emerald-200 bg-emerald-50/40' : 'border-stone-200 bg-white'}`}>
                         <button type="button" onClick={() => toggleSegment(segment.id)} className="mb-3 inline-flex items-center gap-2 text-sm font-bold text-slate-800">
                           {segment.selected ? <CheckSquare className="h-5 w-5 text-[#145947]" /> : <Square className="h-5 w-5 text-slate-400" />}
                           {index + 1}. {formatTimestamp(segment.start)} - {formatTimestamp(segment.end)}
                         </button>
                         {segment.frame ? (
-                          <img src={mediaUrl(segment.frame.url)} alt={segment.title} className="aspect-video w-full rounded-md border border-slate-200 object-cover" />
+                          <img src={mediaUrl(segment.frame.url)} alt={segment.title} className="aspect-video w-full rounded-md border border-slate-200 object-cover shadow-[0_10px_22px_rgba(15,23,42,0.12)]" />
                         ) : (
                           <div className="flex aspect-video w-full items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-400">
                             <ImageIcon className="h-8 w-8" />
@@ -297,7 +297,7 @@ export function ResultsPage() {
 
                     <div className="grid gap-4">
                       {content.chapters.map((chapter, chapterIndex) => (
-                        <section key={`${chapter.title}-${chapterIndex}`} className="rounded-lg border border-slate-200 p-4">
+                        <section key={`${chapter.title}-${chapterIndex}`} className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_12px_26px_rgba(66,55,35,0.08)]">
                           <div className="mb-4 flex items-center justify-between gap-3">
                             <h2 className="text-lg font-bold text-slate-950">장면 {chapterIndex + 1}</h2>
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{chapter.timestamp}</span>
@@ -316,7 +316,7 @@ export function ResultsPage() {
                     <StringListEditor title="마지막 정리" items={content.final_summary} onChange={(index, value) => updateTopList('final_summary', index, value)} onAdd={() => addTopListItem('final_summary')} onRemove={(index) => removeTopListItem('final_summary', index)} />
                     <StringListEditor title="복습 질문" items={content.review_questions} onChange={(index, value) => updateTopList('review_questions', index, value)} onAdd={() => addTopListItem('review_questions')} onRemove={(index) => removeTopListItem('review_questions', index)} />
                     <div className="flex justify-end">
-                      <button type="button" onClick={downloadEditedPdf} disabled={isDownloadingPdf} className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-5 py-3 font-black text-white hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300">
+                      <button type="button" onClick={downloadEditedPdf} disabled={isDownloadingPdf} className="inline-flex items-center gap-2 rounded-lg bg-[#145947] px-5 py-3 font-black text-white shadow-[0_12px_24px_rgba(20,89,71,0.22)] transition hover:-translate-y-0.5 hover:bg-[#0f4639] disabled:cursor-not-allowed disabled:bg-stone-300 disabled:shadow-none">
                         {isDownloadingPdf ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
                         수정본 PDF 다운로드
                       </button>
@@ -329,7 +329,7 @@ export function ResultsPage() {
 
               {tab === 'preview' ? (
                 content ? (
-                  <iframe title="문서 미리보기" src={apiUrl(`/jobs/${jobId}/preview`)} className="h-[760px] w-full rounded-lg border border-stone-200 bg-white" />
+                  <iframe title="문서 미리보기" src={apiUrl(`/jobs/${jobId}/preview`)} className="h-[760px] w-full rounded-lg border border-stone-200 bg-white shadow-[0_16px_34px_rgba(66,55,35,0.1)]" />
                 ) : (
                   <EmptyEditor onCreate={createDraft} disabled={!selectedIds.length || isGeneratingDraft} loading={isGeneratingDraft} />
                 )

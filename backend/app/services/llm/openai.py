@@ -11,6 +11,7 @@ from app.schemas.jobs import GenerationOptions
 from app.schemas.pipeline import (
     ChapterAnalysis,
     KeyMomentAnalysis,
+    LessonChapter,
     LessonContent,
     SceneWindowSummary,
     SceneWindowSummaryList,
@@ -23,6 +24,9 @@ from app.services.transcript_parser import correct_common_transcript_terms
 from app.services.video import format_timestamp
 
 logger = logging.getLogger(__name__)
+
+LESSON_CHUNK_THRESHOLD = 12
+LESSON_CHUNK_SIZE = 8
 
 
 class OpenAILLMProvider(LLMProvider):
@@ -104,6 +108,9 @@ class OpenAILLMProvider(LLMProvider):
         windows: list[dict],
         options: GenerationOptions,
     ) -> LessonContent:
+        if len(windows) > LESSON_CHUNK_THRESHOLD:
+            return self._generate_lesson_from_windows_in_batches(title, transcript, windows, options)
+
         scene_inputs = [window_for_prompt(window, max_chars=1300) for window in windows]
         schema = {
             "title": "string",
@@ -126,6 +133,8 @@ class OpenAILLMProvider(LLMProvider):
         }
         prompt = (
             "선택된 장면 구간을 바탕으로 한국어 강의 노트를 만드세요. "
+            "입력된 Scenes 배열의 각 항목마다 chapters 항목을 정확히 1개씩 같은 순서로 생성하세요. "
+            "예를 들어 Scenes가 12개이면 chapters도 반드시 12개여야 합니다. "
             "겹쳐 추출된 자동 자막, 잘못 끊긴 어절, 어색한 조사와 반복을 자연스럽게 고치세요. "
             "원문에 없는 사실은 추가하지 말고, 보충 설명이 필요하면 '보충 설명:'으로 시작하세요.\n\n"
             f"문서 제목: {title}\n"
@@ -136,11 +145,218 @@ class OpenAILLMProvider(LLMProvider):
             f"Scenes:\n{json.dumps(scene_inputs, ensure_ascii=False)}"
         )
         try:
-            data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=5200)
-            return clean_lesson_content(LessonContent.model_validate(data))
+            data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=max(5200, min(12000, len(windows) * 750)))
+            lesson = clean_lesson_content(LessonContent.model_validate(data))
+            if len(lesson.chapters) != len(windows):
+                chapters = self._repair_lesson_chapter_batch(lesson.chapters, title, windows, options, 1)
+                return LessonContent.model_validate(
+                    {
+                        **lesson.model_dump(),
+                        "chapters": [chapter.model_dump() for chapter in chapters],
+                    }
+                )
+            return lesson
         except Exception:
             logger.exception("OpenAI lesson generation failed; falling back to mock output")
             return self.fallback.generate_lesson_from_scene_windows(title, transcript, windows, options)
+
+    def _generate_lesson_from_windows_in_batches(
+        self,
+        title: str,
+        transcript: TranscriptData,
+        windows: list[dict],
+        options: GenerationOptions,
+    ) -> LessonContent:
+        fallback = self.fallback.generate_lesson_from_scene_windows(title, transcript, windows, options)
+        metadata = self._generate_lesson_metadata(title, transcript, windows, options, fallback)
+        chapters: list[LessonChapter] = []
+        for start_index in range(0, len(windows), LESSON_CHUNK_SIZE):
+            batch = windows[start_index : start_index + LESSON_CHUNK_SIZE]
+            chapters.extend(self._generate_lesson_chapter_batch(title, batch, options, start_index + 1))
+
+        return clean_lesson_content(
+            LessonContent(
+                title=metadata["title"],
+                overview=metadata["overview"],
+                learning_objectives=metadata["learning_objectives"],
+                chapters=chapters,
+                final_summary=metadata["final_summary"],
+                review_questions=metadata["review_questions"],
+            )
+        )
+
+    def _generate_lesson_metadata(
+        self,
+        title: str,
+        transcript: TranscriptData,
+        windows: list[dict],
+        options: GenerationOptions,
+        fallback: LessonContent,
+    ) -> dict:
+        schema = {
+            "title": "string",
+            "overview": "string",
+            "learning_objectives": ["string"],
+            "final_summary": ["string"],
+            "review_questions": ["string"],
+        }
+        scene_outline = [
+            {
+                "scene_number": index,
+                "title": str(window.get("title") or ""),
+                "start": float(window.get("start") or 0),
+                "end": float(window.get("end") or 0),
+                "summary": str(window.get("summary") or ""),
+            }
+            for index, window in enumerate(windows, start=1)
+        ]
+        prompt = (
+            "선택된 전체 장면 흐름을 바탕으로 한국어 강의 노트의 문서 메타 정보를 만드세요. "
+            "chapters는 여기서 생성하지 않습니다. 모든 장면을 훑은 뒤 전체 개요, 학습 목표, 마지막 정리, 복습 질문만 작성하세요. "
+            "원문에 없는 사실은 추가하지 마세요.\n\n"
+            f"문서 제목: {title}\n"
+            f"난이도: {options.difficulty}\n"
+            f"자료 유형: {options.material_type}\n"
+            f"분량: {options.pdf_length}\n\n"
+            f"JSON shape:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
+            f"Transcript sample:\n{format_segments(transcript.segments, max_chars=6000)}\n\n"
+            f"Scene outline:\n{json.dumps(scene_outline, ensure_ascii=False)}"
+        )
+        try:
+            data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=1800)
+            return {
+                "title": str(data.get("title") or fallback.title),
+                "overview": str(data.get("overview") or fallback.overview),
+                "learning_objectives": string_list(data.get("learning_objectives"), fallback.learning_objectives),
+                "final_summary": string_list(data.get("final_summary"), fallback.final_summary),
+                "review_questions": string_list(data.get("review_questions"), fallback.review_questions),
+            }
+        except Exception:
+            logger.exception("OpenAI lesson metadata generation failed; using fallback metadata")
+            return {
+                "title": fallback.title,
+                "overview": fallback.overview,
+                "learning_objectives": fallback.learning_objectives,
+                "final_summary": fallback.final_summary,
+                "review_questions": fallback.review_questions,
+            }
+
+    def _generate_lesson_chapter_batch(
+        self,
+        title: str,
+        windows: list[dict],
+        options: GenerationOptions,
+        start_number: int,
+    ) -> list[LessonChapter]:
+        scene_inputs = [
+            {
+                **window_for_prompt(window, max_chars=1700),
+                "scene_number": start_number + offset,
+            }
+            for offset, window in enumerate(windows)
+        ]
+        schema = {
+            "chapters": [
+                {
+                    "title": "13. string",
+                    "learning_objectives": ["string"],
+                    "explanation": "string",
+                    "beginner_explanation": "string",
+                    "key_points": ["string"],
+                    "terms": [{"term": "string", "definition": "string"}],
+                    "timestamp": "00:00",
+                    "summary": "string",
+                }
+            ]
+        }
+        expected_count = len(windows)
+        end_number = start_number + expected_count - 1
+        prompt = (
+            "선택된 장면 구간 각각에 대해 한국어 강의 노트 chapter를 생성하세요. "
+            "입력 Scenes 배열의 각 항목마다 chapters 항목을 정확히 1개씩 같은 순서로 생성하세요. "
+            f"이번 배치는 전체 문서 중 장면 {start_number}부터 {end_number}까지입니다. "
+            "각 chapter.title은 반드시 해당 scene_number로 시작하세요. "
+            "내용 정리, 핵심 포인트, 주요 용어는 해당 장면의 transcript와 current_summary에 근거해야 하며, "
+            "뒤쪽 장면이라고 해서 짧게 쓰거나 일반적인 문장으로 대체하지 마세요. "
+            "terms는 실제 장면 내용에 등장하거나 명확히 설명되는 개념만 고르세요. "
+            "겹쳐 추출된 자동 자막, 잘못 끊긴 어절, 어색한 조사와 반복을 자연스럽게 고치세요. "
+            "원문에 없는 사실은 추가하지 말고, 보충 설명이 필요하면 '보충 설명:'으로 시작하세요.\n\n"
+            f"문서 제목: {title}\n"
+            f"난이도: {options.difficulty}\n"
+            f"자료 유형: {options.material_type}\n"
+            f"분량: {options.pdf_length}\n\n"
+            f"JSON shape:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
+            f"Scenes:\n{json.dumps(scene_inputs, ensure_ascii=False)}"
+        )
+        try:
+            data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=max(4200, min(10000, expected_count * 1050)))
+            chapters = [LessonChapter.model_validate(item) for item in data.get("chapters", [])]
+            return self._repair_lesson_chapter_batch(chapters, title, windows, options, start_number)
+        except Exception:
+            logger.exception("OpenAI lesson chapter batch generation failed; retrying scenes %s-%s individually", start_number, end_number)
+            return [
+                self._generate_lesson_chapter_for_window(title, window, options, start_number + offset)
+                for offset, window in enumerate(windows)
+            ]
+
+    def _repair_lesson_chapter_batch(
+        self,
+        chapters: list[LessonChapter],
+        title: str,
+        windows: list[dict],
+        options: GenerationOptions,
+        start_number: int,
+    ) -> list[LessonChapter]:
+        if len(chapters) == len(windows):
+            return normalize_chapter_numbers(chapters, start_number)
+
+        logger.warning("OpenAI lesson chapter batch count mismatch: expected %s, got %s", len(windows), len(chapters))
+        repaired = chapters[: len(windows)]
+        if len(repaired) < len(windows):
+            for offset in range(len(repaired), len(windows)):
+                repaired.append(self._generate_lesson_chapter_for_window(title, windows[offset], options, start_number + offset))
+        return normalize_chapter_numbers(repaired, start_number)
+
+    def _generate_lesson_chapter_for_window(
+        self,
+        title: str,
+        window: dict,
+        options: GenerationOptions,
+        scene_number: int,
+    ) -> LessonChapter:
+        scene_input = {**window_for_prompt(window, max_chars=2200), "scene_number": scene_number}
+        schema = {
+            "chapter": {
+                "title": f"{scene_number}. string",
+                "learning_objectives": ["string"],
+                "explanation": "string",
+                "beginner_explanation": "string",
+                "key_points": ["string"],
+                "terms": [{"term": "string", "definition": "string"}],
+                "timestamp": "00:00",
+                "summary": "string",
+            }
+        }
+        prompt = (
+            "다음 단일 장면을 한국어 강의 노트 chapter로 작성하세요. "
+            f"chapter.title은 반드시 '{scene_number}. '로 시작하세요. "
+            "내용 정리, 핵심 포인트, 주요 용어는 이 장면의 transcript와 current_summary에 근거해야 합니다. "
+            "terms는 실제 장면 내용에 등장하거나 명확히 설명되는 개념만 고르세요. "
+            "원문에 없는 사실은 추가하지 말고, 보충 설명이 필요하면 '보충 설명:'으로 시작하세요.\n\n"
+            f"문서 제목: {title}\n"
+            f"난이도: {options.difficulty}\n"
+            f"자료 유형: {options.material_type}\n"
+            f"분량: {options.pdf_length}\n\n"
+            f"JSON shape:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
+            f"Scene:\n{json.dumps(scene_input, ensure_ascii=False)}"
+        )
+        try:
+            data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=2200)
+            return normalize_chapter_numbers([LessonChapter.model_validate(data.get("chapter", data))], scene_number)[0]
+        except Exception:
+            logger.exception("OpenAI single scene lesson generation failed; using fallback for scene %s", scene_number)
+            fallback = self.fallback.generate_lesson_from_scene_windows(title, TranscriptData(segments=[], duration=0), [window], options)
+            return normalize_chapter_numbers(fallback.chapters, scene_number)[0]
 
     def summarize_scene_windows(self, windows: list[dict]) -> SceneWindowSummaryList:
         if not windows:
@@ -305,3 +521,43 @@ def clean_lesson_content(content: LessonContent) -> LessonContent:
             for term in chapter["terms"]
         ]
     return LessonContent.model_validate(data)
+
+
+def string_list(value: Any, fallback: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return fallback
+    items = [str(item).strip() for item in value if str(item).strip()]
+    return items or fallback
+
+
+def normalize_chapter_numbers(chapters: list[LessonChapter], start_number: int) -> list[LessonChapter]:
+    normalized: list[LessonChapter] = []
+    for offset, chapter in enumerate(chapters):
+        scene_number = start_number + offset
+        title_without_number = re.sub(r"^\s*\d+\s*[.)]\s*", "", chapter.title).strip()
+        normalized.append(chapter.model_copy(update={"title": f"{scene_number}. {title_without_number or chapter.title}"}))
+    return normalized
+
+
+def ensure_lesson_covers_windows(
+    content: LessonContent,
+    title: str,
+    transcript: TranscriptData,
+    windows: list[dict],
+    options: GenerationOptions,
+) -> LessonContent:
+    if len(content.chapters) == len(windows):
+        return content
+
+    logger.warning("OpenAI lesson chapter count mismatch: expected %s, got %s", len(windows), len(content.chapters))
+    fallback = MockLLMProvider().generate_lesson_from_scene_windows(title, transcript, windows, options)
+    chapters = content.chapters[: len(windows)]
+    if len(chapters) < len(windows):
+        chapters.extend(fallback.chapters[len(chapters):])
+
+    return LessonContent.model_validate(
+        {
+            **content.model_dump(),
+            "chapters": [chapter.model_dump() for chapter in chapters],
+        }
+    )

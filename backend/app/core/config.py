@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     frame_capture_offset: int = 3
     frame_capture_count: int = 5
     frame_hash_distance_threshold: int = 8
+    scene_review_interval_seconds: int = Field(default=25, ge=5)
+    scene_review_min_scenes: int = Field(default=12, ge=1)
+    scene_review_max_scenes: int = Field(default=120, ge=1)
     pdf_provider: str = "playwright"
 
     model_config = SettingsConfigDict(env_file="../.env", env_file_encoding="utf-8", extra="ignore")
