@@ -40,6 +40,24 @@ LLM_PROVIDER=mock
 STT_PROVIDER=mock
 ```
 
+Use OpenAI for generated chapter summaries and lesson content:
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+Use Gemini through the OpenAI-compatible Gemini endpoint:
+
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.7-flash
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+```
+
 ## Troubleshooting
 
 - If FFmpeg is missing, install it and add it to PATH for real video processing.

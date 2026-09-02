@@ -27,16 +27,30 @@ logger = logging.getLogger(__name__)
 
 LESSON_CHUNK_THRESHOLD = 12
 LESSON_CHUNK_SIZE = 8
+DEFAULT_OPENAI_SETTING = object()
 
 
 class OpenAILLMProvider(LLMProvider):
-    def __init__(self) -> None:
-        if not settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is required for the OpenAI LLM provider.")
-        self.api_key = settings.openai_api_key
-        self.model = settings.openai_model
-        self.base_url = str(settings.openai_base_url).rstrip("/")
+    def __init__(
+        self,
+        api_key: str | None | object = DEFAULT_OPENAI_SETTING,
+        model: str | None = None,
+        base_url: str | None = None,
+        provider_label: str = "OpenAI",
+        api_key_name: str = "OPENAI_API_KEY",
+    ) -> None:
+        resolved_api_key = settings.openai_api_key if api_key is DEFAULT_OPENAI_SETTING else api_key
+        if not resolved_api_key:
+            raise RuntimeError(f"{api_key_name} is required for the {provider_label} LLM provider.")
+        self.api_key = str(resolved_api_key)
+        self.model = model or settings.openai_model
+        self.base_url = str(base_url or settings.openai_base_url).rstrip("/")
+        self._provider_label = provider_label
         self.fallback = MockLLMProvider()
+
+    @property
+    def provider_label(self) -> str:
+        return getattr(self, "_provider_label", "OpenAI")
 
     def analyze_transcript(self, transcript: TranscriptData) -> dict:
         return {"language": transcript.language, "segment_count": len(transcript.segments), "duration": transcript.duration}
@@ -57,7 +71,7 @@ class OpenAILLMProvider(LLMProvider):
             data = self._chat_json(CHAPTER_SYSTEM_PROMPT, prompt, max_tokens=2200)
             return ChapterAnalysis.model_validate(data)
         except Exception:
-            logger.exception("OpenAI chapter generation failed; falling back to mock output")
+            logger.exception("%s chapter generation failed; falling back to mock output", self.provider_label)
             return self.fallback.generate_chapters(transcript)
 
     def select_key_moments(self, transcript: TranscriptData, chapters: ChapterAnalysis) -> KeyMomentAnalysis:
@@ -78,7 +92,7 @@ class OpenAILLMProvider(LLMProvider):
             data = self._chat_json(KEY_MOMENT_SYSTEM_PROMPT, prompt, max_tokens=2200)
             return KeyMomentAnalysis.model_validate(data)
         except Exception:
-            logger.exception("OpenAI key moment generation failed; falling back to mock output")
+            logger.exception("%s key moment generation failed; falling back to mock output", self.provider_label)
             return self.fallback.select_key_moments(transcript, chapters)
 
     def generate_lesson_content(
@@ -157,7 +171,7 @@ class OpenAILLMProvider(LLMProvider):
                 )
             return lesson
         except Exception:
-            logger.exception("OpenAI lesson generation failed; falling back to mock output")
+            logger.exception("%s lesson generation failed; falling back to mock output", self.provider_label)
             return self.fallback.generate_lesson_from_scene_windows(title, transcript, windows, options)
 
     def _generate_lesson_from_windows_in_batches(
@@ -232,7 +246,7 @@ class OpenAILLMProvider(LLMProvider):
                 "review_questions": string_list(data.get("review_questions"), fallback.review_questions),
             }
         except Exception:
-            logger.exception("OpenAI lesson metadata generation failed; using fallback metadata")
+            logger.exception("%s lesson metadata generation failed; using fallback metadata", self.provider_label)
             return {
                 "title": fallback.title,
                 "overview": fallback.overview,
@@ -293,7 +307,12 @@ class OpenAILLMProvider(LLMProvider):
             chapters = [LessonChapter.model_validate(item) for item in data.get("chapters", [])]
             return self._repair_lesson_chapter_batch(chapters, title, windows, options, start_number)
         except Exception:
-            logger.exception("OpenAI lesson chapter batch generation failed; retrying scenes %s-%s individually", start_number, end_number)
+            logger.exception(
+                "%s lesson chapter batch generation failed; retrying scenes %s-%s individually",
+                self.provider_label,
+                start_number,
+                end_number,
+            )
             return [
                 self._generate_lesson_chapter_for_window(title, window, options, start_number + offset)
                 for offset, window in enumerate(windows)
@@ -310,7 +329,12 @@ class OpenAILLMProvider(LLMProvider):
         if len(chapters) == len(windows):
             return normalize_chapter_numbers(chapters, start_number)
 
-        logger.warning("OpenAI lesson chapter batch count mismatch: expected %s, got %s", len(windows), len(chapters))
+        logger.warning(
+            "%s lesson chapter batch count mismatch: expected %s, got %s",
+            self.provider_label,
+            len(windows),
+            len(chapters),
+        )
         repaired = chapters[: len(windows)]
         if len(repaired) < len(windows):
             for offset in range(len(repaired), len(windows)):
@@ -354,7 +378,7 @@ class OpenAILLMProvider(LLMProvider):
             data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=2200)
             return normalize_chapter_numbers([LessonChapter.model_validate(data.get("chapter", data))], scene_number)[0]
         except Exception:
-            logger.exception("OpenAI single scene lesson generation failed; using fallback for scene %s", scene_number)
+            logger.exception("%s single scene lesson generation failed; using fallback for scene %s", self.provider_label, scene_number)
             fallback = self.fallback.generate_lesson_from_scene_windows(title, TranscriptData(segments=[], duration=0), [window], options)
             return normalize_chapter_numbers(fallback.chapters, scene_number)[0]
 
@@ -384,7 +408,7 @@ class OpenAILLMProvider(LLMProvider):
             parsed = SceneWindowSummaryList.model_validate(data)
             return clean_scene_summaries(fill_missing_scene_summaries(windows, parsed))
         except Exception:
-            logger.exception("OpenAI scene summary generation failed; falling back to local summaries")
+            logger.exception("%s scene summary generation failed; falling back to local summaries", self.provider_label)
             return self.fallback.summarize_scene_windows(windows)
 
     def summarize(self, transcript: TranscriptData) -> str:
@@ -399,7 +423,7 @@ class OpenAILLMProvider(LLMProvider):
             if summary:
                 return summary
         except Exception:
-            logger.exception("OpenAI transcript summary failed; falling back to mock output")
+            logger.exception("%s transcript summary failed; falling back to mock output", self.provider_label)
         return self.fallback.summarize(transcript)
 
     def _chat_json(self, system: str, user: str, max_tokens: int) -> dict[str, Any]:

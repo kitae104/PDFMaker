@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"
     gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.7-flash"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
     max_upload_size_mb: int = 2048

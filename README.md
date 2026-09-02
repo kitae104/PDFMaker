@@ -44,6 +44,28 @@ This lets the full pipeline run without external API keys. If FFmpeg is not inst
 
 YouTube URL input is also wired for local testing. It validates the URL, reads public oEmbed metadata when available, builds the scene review step, and then creates an editable document draft before PDF download.
 
+## LLM Provider Selection
+
+Use OpenAI:
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+Use Gemini through its OpenAI-compatible endpoint:
+
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.7-flash
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+```
+
+If a selected provider is missing its API key, the backend falls back to mock LLM output so the local pipeline can still run.
+
 ## Optional FFmpeg
 
 Install FFmpeg and ensure `ffmpeg` and `ffprobe` are on PATH to enable real metadata, audio extraction, and frame capture.
