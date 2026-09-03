@@ -192,7 +192,7 @@ class DocumentGenerator:
 
     def _src_to_file_uri(self, src: str) -> str:
         if src.startswith("/storage/"):
-            relative = src.removeprefix("/storage/").replace("/", "\\")
+            relative = Path(*src.removeprefix("/storage/").split("/"))
             return (settings.storage_path / relative).resolve().as_uri()
         return Path(src).resolve().as_uri()
 

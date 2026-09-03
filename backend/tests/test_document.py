@@ -1,5 +1,6 @@
 from PIL import Image as PILImage
 from pypdf import PdfReader
+from urllib.parse import unquote, urlparse
 
 from app.schemas.pipeline import LessonChapter, LessonContent
 from app.services.document import DocumentGenerator
@@ -77,6 +78,21 @@ def test_reportlab_fallback_starts_each_chapter_on_new_page(tmp_path):
     pdf = generator._fallback_pdf(html, tmp_path / "paged.pdf", content=content)
 
     assert len(PdfReader(str(pdf)).pages) >= 3
+
+
+def test_storage_image_src_converts_to_platform_path(tmp_path, monkeypatch):
+    storage = tmp_path / "storage"
+    frame = storage / "jobs" / "abc123" / "frames" / "scene.jpg"
+    frame.parent.mkdir(parents=True)
+    frame.write_bytes(b"image")
+    monkeypatch.setattr("app.services.document.settings.storage_path", storage)
+
+    uri = DocumentGenerator()._src_to_file_uri("/storage/jobs/abc123/frames/scene.jpg")
+
+    parsed = urlparse(uri)
+    assert parsed.scheme == "file"
+    assert "%5C" not in uri
+    assert unquote(parsed.path).replace("\\", "/").endswith("/storage/jobs/abc123/frames/scene.jpg")
 
 
 def pdf_has_image(reader: PdfReader) -> bool:

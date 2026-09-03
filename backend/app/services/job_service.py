@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import re
 
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -528,12 +529,18 @@ TRAILING_NON_LEARNING_PATTERNS = [
     r"다음\s*(시간|강의|영상|내용|편|회차)",
     r"다음에\s*(보|만나)",
     r"다음\s*내용\s*소개",
+    r"다음\s*(편|에피소드|콘텐츠)",
     r"예고",
+    r"채널\s*(클로징|마무리|엔딩)",
+    r"(클로징|엔딩|아웃트로|outro|ending)\s*(인사|멘트|화면|구간|장면)?",
     r"마무리\s*(인사|멘트)",
+    r"마무리\s*(클로징|인사말)",
+    r"인사말",
     r"(여기까지|이상으로).{0,20}마무리",
     r"마무리하(겠|도록)",
     r"시청해\s*주셔서",
     r"시청\s*감사",
+    r"봐\s*주셔서\s*감사",
     r"구독",
     r"좋아요",
     r"알림\s*설정",
@@ -541,6 +548,31 @@ TRAILING_NON_LEARNING_PATTERNS = [
     r"subscribe",
     r"like\s+and\s+subscribe",
     r"thanks?\s+for\s+watching",
+    r"(검은|블랙)\s*(화면|장면)",
+    r"(끝|종료)\s*(화면|크레딧)",
+]
+
+TRAILING_SPARSE_NON_LEARNING_PATTERNS = [
+    r"추출\s*가능한\s*스크립트가\s*많지",
+    r"자막\s*(없음|없|부족)",
+    r"대사\s*(없음|없|부족)",
+    r"무음",
+    r"음악",
+]
+
+LEARNING_SIGNAL_PATTERNS = [
+    r"개념",
+    r"원리",
+    r"핵심",
+    r"학습",
+    r"설명",
+    r"정리",
+    r"요약",
+    r"예시",
+    r"실습",
+    r"과정",
+    r"비교",
+    r"분석",
 ]
 
 
@@ -568,7 +600,37 @@ def is_trailing_non_learning_window(window: dict, summaries_by_id: dict, duratio
         " ".join(segment.text for segment in segments[-8:] if segment.text.strip()),
     ]
     text = re.sub(r"\s+", " ", " ".join(text_parts)).lower()
-    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in TRAILING_NON_LEARNING_PATTERNS)
+    if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in TRAILING_NON_LEARNING_PATTERNS):
+        return True
+
+    window_length = max(float(window.get("end") or 0) - start, 0)
+    is_short_tail = window_length <= 20 or bool(duration and window_length <= duration * 0.025)
+    sparse_non_learning_text = any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in TRAILING_SPARSE_NON_LEARNING_PATTERNS)
+    has_learning_signal = any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in LEARNING_SIGNAL_PATTERNS)
+    if is_short_tail and not has_learning_signal and (sparse_non_learning_text or is_mostly_dark_frame(window.get("frame_path"))):
+        return True
+
+    return False
+
+
+def is_mostly_dark_frame(frame_path: object, dark_threshold: int = 28, min_dark_ratio: float = 0.82) -> bool:
+    if not frame_path:
+        return False
+    try:
+        path = Path(str(frame_path))
+        if not path.exists():
+            return False
+        with Image.open(path) as image:
+            grayscale = image.convert("L")
+            grayscale.thumbnail((80, 80))
+            pixels = list(grayscale.getdata())
+        if not pixels:
+            return False
+        dark_pixels = sum(1 for value in pixels if value <= dark_threshold)
+        return dark_pixels / len(pixels) >= min_dark_ratio
+    except Exception:
+        logger.debug("Failed to inspect trailing frame darkness: %s", frame_path, exc_info=True)
+        return False
 
 
 def build_review_segments(db: Session, storage: StorageService, job: Job, transcript: TranscriptData | None = None) -> list[dict]:
