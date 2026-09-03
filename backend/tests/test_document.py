@@ -80,6 +80,36 @@ def test_reportlab_fallback_starts_each_chapter_on_new_page(tmp_path):
     assert len(PdfReader(str(pdf)).pages) >= 3
 
 
+def test_render_html_adds_spacing_after_easy_explanation(tmp_path):
+    generator = DocumentGenerator()
+    output = tmp_path / "lecture.html"
+    content = LessonContent(
+        title="한글 제목",
+        overview="한글 개요입니다.",
+        learning_objectives=["한글 목표를 이해한다."],
+        chapters=[
+            LessonChapter(
+                title="1. 장면",
+                learning_objectives=["장면 내용을 설명한다."],
+                explanation="개념 설명입니다.",
+                beginner_explanation="쉽게 이해할 수 있는 설명입니다.",
+                key_points=["핵심 포인트"],
+                terms=[],
+                timestamp="00:00",
+                summary="한 줄 정리",
+            )
+        ],
+        final_summary=["마지막 정리"],
+        review_questions=["복습 질문"],
+    )
+
+    generator.render_html(output, content, project={"title": "영상", "source_type": "video"}, chapters=[], moments=[], frames=[])
+    html = output.read_text(encoding="utf-8")
+
+    assert ".explain-callout { margin-bottom: 34px; }" in html
+    assert '<div class="callout explain-callout">쉽게 이해할 수 있는 설명입니다.</div>' in html
+
+
 def test_storage_image_src_converts_to_platform_path(tmp_path, monkeypatch):
     storage = tmp_path / "storage"
     frame = storage / "jobs" / "abc123" / "frames" / "scene.jpg"

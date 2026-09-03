@@ -125,6 +125,7 @@ class DocumentGenerator:
                     story.append(Paragraph(self._p(chapter.explanation), styles["body"]))
                     story.append(Paragraph("쉽게 이해하기", styles["h3"]))
                     story.append(Paragraph(self._p(chapter.beginner_explanation), styles["callout"]))
+                    story.append(Spacer(1, 4 * mm))
                     story.append(Paragraph("핵심 포인트", styles["h3"]))
                     story.append(self._list_flowable(chapter.key_points, styles))
                     if chapter.terms:

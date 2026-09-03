@@ -32,6 +32,7 @@
     p, ul, ol, table, .callout, .frame { margin-top: 0; }
     .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 12px; font-weight: 700; }
     .callout { border-left: 5px solid #4f7cff; background: #eff6ff; padding: 16px 18px; border-radius: 8px; margin: 12px 0 24px; }
+    .explain-callout { margin-bottom: 34px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .frame { width: 100%; border-radius: 8px; border: 1px solid #bfdbfe; margin: 18px 0 28px; }
     table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; }
@@ -81,7 +82,7 @@
         <h3>개념 설명</h3>
         <p>{{ chapter.explanation }}</p>
         <h3>쉽게 이해하기</h3>
-        <div class="callout">{{ chapter.beginner_explanation }}</div>
+        <div class="callout explain-callout">{{ chapter.beginner_explanation }}</div>
         <h3>핵심 포인트</h3>
         <ul>{% for point in chapter.key_points %}<li>{{ point }}</li>{% endfor %}</ul>
         <h3>주요 용어</h3>
