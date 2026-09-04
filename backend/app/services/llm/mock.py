@@ -165,10 +165,16 @@ def segments_between(transcript: TranscriptData, start: float, end: float):
 
 
 def make_title(segments, fallback: str) -> str:
+    text = normalize_text(" ".join(segment.text for segment in segments))
+    if not text:
+        return fallback
+    title = make_learning_title(text)
+    if title:
+        return title
     for segment in segments:
-        text = normalize_text(segment.text)
-        if len(text) >= 8:
-            words = text.split()
+        segment_text = remove_intro_phrases(normalize_text(segment.text))
+        if len(segment_text) >= 8:
+            words = segment_text.split()
             return " ".join(words[:8]).rstrip(".,!?")[:80]
     return fallback
 
@@ -177,8 +183,7 @@ def make_summary(segments, max_chars: int = 300, fallback: str = "") -> str:
     texts = [normalize_text(segment.text) for segment in segments if normalize_text(segment.text)]
     if not texts:
         return fallback
-    summary = " ".join(texts[:8])
-    return summary[:max_chars].rstrip()
+    return summarize_text(" ".join(texts), max_chars=max_chars, fallback=fallback)
 
 
 def make_key_points(segments) -> list[str]:
@@ -207,3 +212,85 @@ def extract_terms(segments) -> list[str]:
 
 def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def remove_intro_phrases(text: str) -> str:
+    patterns = [
+        r"^여러분[,.!?]?\s*",
+        r"^안녕하세요[,.!?]?\s*",
+        r"^오늘은\s*",
+        r"^자\s*",
+        r"^그럼\s*",
+    ]
+    cleaned = text
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def make_learning_title(text: str) -> str:
+    cleaned = remove_intro_phrases(text)
+    topic_rules = [
+        (("페인트", "도료"), ("자동차", "차"), "자동차 도료 개요"),
+        (("도장", "칠"), ("자동차", "차"), "자동차 도장 원리"),
+        (("엔진",), (), "엔진 구조와 작동 원리"),
+        (("브레이크", "제동"), (), "제동 시스템 핵심 원리"),
+        (("전기차", "배터리"), (), "전기차 배터리 시스템"),
+        (("변속기", "미션"), (), "변속기 구조와 동력 전달"),
+        (("센서", "제어"), (), "차량 센서와 제어 기술"),
+    ]
+    for primary_terms, context_terms, title in topic_rules:
+        if any(term in cleaned for term in primary_terms) and (not context_terms or any(term in cleaned for term in context_terms)):
+            subtitle = make_subtitle(cleaned)
+            return f"{title}: {subtitle}" if subtitle else title
+    keywords = extract_terms_from_text(cleaned)
+    if keywords:
+        head = " ".join(keywords[:2])
+        subtitle = make_subtitle(cleaned)
+        return f"{head} 핵심 개념: {subtitle}" if subtitle else f"{head} 핵심 개념"
+    return ""
+
+
+def make_subtitle(text: str) -> str:
+    subtitle_rules = [
+        (("화학", "공학", "기술"), "화학 공학 기술의 집약체"),
+        (("재료", "혼합", "제조"), "재료와 제조 공정의 이해"),
+        (("원리", "작동"), "작동 원리의 이해"),
+        (("구조", "부품"), "구조와 부품의 연결"),
+        (("비교", "차이"), "차이점과 적용 조건"),
+    ]
+    for terms, subtitle in subtitle_rules:
+        if any(term in text for term in terms):
+            return subtitle
+    return ""
+
+
+def summarize_text(text: str, max_chars: int, fallback: str) -> str:
+    cleaned = remove_intro_phrases(normalize_text(text))
+    if not cleaned:
+        return fallback
+    sentences = re.split(r"(?<=[.!?。！？])\s+|(?<=[다요죠])\s+", cleaned)
+    sentences = [sentence.strip(" ,.?!") for sentence in sentences if len(sentence.strip()) >= 8]
+    candidates = [
+        sentence
+        for sentence in sentences
+        if not re.search(r"^(여러분|안녕하세요|오늘은|그러니까|자\b)", sentence)
+    ]
+    selected = candidates[:2] or sentences[:2] or [cleaned]
+    summary = " ".join(selected)
+    if len(summary) > max_chars:
+        summary = summary[:max_chars].rstrip()
+    if summary and summary[-1] not in ".!?다요죠":
+        summary += "."
+    return summary
+
+
+def extract_terms_from_text(text: str) -> list[str]:
+    stopwords = {"여러분", "생각하셨겠죠", "하지만", "그리고", "그러면", "이렇게", "저렇게", "것입니다", "있습니다", "합니다", "오늘은", "영상에서", "설명", "드리겠습니다"}
+    tokens = re.findall(r"[A-Za-z가-힣0-9]{2,}", text)
+    counts: dict[str, int] = {}
+    for token in tokens:
+        if token in stopwords:
+            continue
+        counts[token] = counts.get(token, 0) + 1
+    return sorted(counts, key=lambda token: (-counts[token], token))

@@ -113,6 +113,11 @@ export async function getDocumentDraft(jobId: string) {
   return data;
 }
 
+export async function updateDocumentDraft(jobId: string, content: LessonContent) {
+  const { data } = await api.put<LessonContent>(`/jobs/${jobId}/document-draft`, content);
+  return data;
+}
+
 export async function generateEditedPdf(jobId: string, content: LessonContent) {
   const { data } = await api.post<Blob>(`/jobs/${jobId}/pdf`, content, { responseType: 'blob' });
   return data;

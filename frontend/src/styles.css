@@ -3,13 +3,33 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
+  --garage-black: #07090a;
+  --carbon: #101416;
+  --line: rgba(255, 255, 255, 0.14);
+  --lime: #b8ff2c;
+  --cyan: #4fe7ff;
+  --amber: #ffb020;
+  --redline: #ff3d3d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--garage-black);
 }
 
 body {
   margin: 0;
+  min-width: 320px;
   font-family: Inter, Pretendard, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f2f0e9;
+  background:
+    radial-gradient(circle at top left, rgba(184, 255, 44, 0.12), transparent 32rem),
+    radial-gradient(circle at top right, rgba(79, 231, 255, 0.11), transparent 30rem),
+    linear-gradient(135deg, #07090a 0%, #101416 52%, #171411 100%);
+  color: #f5f7ef;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -19,4 +39,162 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+button,
+a,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(184, 255, 44, 0.65);
+  outline-offset: 3px;
+}
+
+.app-carbon {
+  position: relative;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.035) 25%, transparent 25%) 0 0 / 22px 22px,
+    linear-gradient(225deg, rgba(255,255,255,0.03) 25%, transparent 25%) 0 0 / 22px 22px,
+    linear-gradient(135deg, #07090a 0%, #101416 52%, #15110f 100%);
+}
+
+.glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(145deg, rgba(21, 28, 31, 0.82), rgba(8, 11, 12, 0.7));
+  box-shadow:
+    0 34px 95px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(184, 255, 44, 0.08);
+  backdrop-filter: blur(22px);
+}
+
+.ivory-panel {
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  background: linear-gradient(145deg, rgba(251, 252, 245, 0.98), rgba(226, 231, 220, 0.92));
+  color: #12171a;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(11, 15, 17, 0.08);
+}
+
+.metal-card {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015)),
+    rgba(16, 21, 23, 0.88);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.light-card {
+  border: 1px solid rgba(20, 26, 29, 0.1);
+  background: linear-gradient(145deg, #ffffff, #eef2e8);
+  box-shadow:
+    0 18px 44px rgba(14, 18, 20, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
+}
+
+.drive-button {
+  border: 1px solid rgba(184, 255, 44, 0.38);
+  background: linear-gradient(180deg, #d7ff5a 0%, #93d91f 54%, #69a90d 100%);
+  color: #11170e;
+  box-shadow:
+    0 18px 32px rgba(108, 171, 16, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -3px 0 rgba(27, 54, 5, 0.28);
+}
+
+.drive-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.04);
+}
+
+.drive-button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    0 9px 18px rgba(108, 171, 16, 0.25),
+    inset 0 2px 5px rgba(27, 54, 5, 0.22);
+}
+
+.drive-button:disabled {
+  cursor: not-allowed;
+  border-color: rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, #d1d5db, #9ca3af);
+  color: #4b5563;
+  box-shadow: none;
+}
+
+.pit-button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, #20282b 0%, #121719 100%);
+  color: #f8faf2;
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.pit-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(79, 231, 255, 0.36);
+}
+
+.race-field {
+  border: 1px solid rgba(22, 28, 31, 0.14);
+  background: linear-gradient(180deg, #f8faf2 0%, #edf2e8 100%);
+  box-shadow:
+    inset 0 2px 5px rgba(7, 9, 10, 0.07),
+    0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.race-field:focus {
+  border-color: rgba(93, 167, 20, 0.86);
+  background: #ffffff;
+}
+
+.speed-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.speed-line::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--redline), var(--amber), var(--lime), var(--cyan));
+}
+
+.gauge-ring {
+  background:
+    conic-gradient(from 230deg, #ff3d3d 0deg, #ffb020 52deg, #b8ff2c 130deg, rgba(255,255,255,0.12) 131deg 360deg),
+    radial-gradient(circle, #151b1e 0 57%, transparent 58%);
+}
+
+.tab-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(184, 255, 44, 0.58) rgba(255, 255, 255, 0.07);
+}
+
+.tab-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.tab-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+}
+
+.tab-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(8, 11, 12, 0.9);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--lime), var(--cyan));
 }

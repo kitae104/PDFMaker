@@ -322,6 +322,7 @@ class JobRunner:
         options = GenerationOptions.model_validate_json(job.options_json)
         self._status(job, JobStatus.GENERATING_CONTENT)
         lesson = self.llm.generate_lesson_from_scene_windows(project.title if project else "Lecture Notes", transcript, windows, options)
+        self._sync_selected_review_with_lesson(job, lesson)
         job_dir = self.storage.job_dir(job.id)
         content_path = job_dir / "html" / "editable_document.json"
         content_path.parent.mkdir(parents=True, exist_ok=True)
@@ -333,14 +334,26 @@ class JobRunner:
         self.db.commit()
         return lesson
 
+    def _sync_selected_review_with_lesson(self, job: Job, lesson: LessonContent) -> None:
+        moments = (
+            self.db.query(KeyMoment)
+            .join(Chapter)
+            .filter(Chapter.project_id == job.project_id, KeyMoment.selected.is_(True))
+            .order_by(KeyMoment.timestamp)
+            .all()
+        )
+        for moment, chapter in zip(moments, lesson.chapters):
+            summary = strip_rich_text(chapter.summary) or strip_rich_text(chapter.explanation) or moment.reason
+            moment.title = chapter.title
+            moment.reason = summary
+            moment.chapter.title = chapter.title
+            moment.chapter.summary = summary
+
     def render_pdf_from_content(self, job_id: str, content: LessonContent) -> Path:
         job = self.db.get(Job, job_id)
         if not job:
             raise RuntimeError("Missing job")
-        job_dir = self.storage.job_dir(job.id)
-        content_path = job_dir / "html" / "editable_document.json"
-        content_path.parent.mkdir(parents=True, exist_ok=True)
-        content_path.write_text(content.model_dump_json(indent=2), encoding="utf-8")
+        self.save_document_draft(job_id, content)
         self._status(job, JobStatus.GENERATING_HTML)
         html_path, pdf_path = self._render_document(job, content)
         self._status(job, JobStatus.GENERATING_PDF)
@@ -357,6 +370,19 @@ class JobRunner:
         job.completed_at = datetime.utcnow()
         self.db.commit()
         return pdf_path
+
+    def save_document_draft(self, job_id: str, content: LessonContent) -> LessonContent:
+        job = self.db.get(Job, job_id)
+        if not job:
+            raise RuntimeError("Missing job")
+        job_dir = self.storage.job_dir(job.id)
+        content_path = job_dir / "html" / "editable_document.json"
+        content_path.parent.mkdir(parents=True, exist_ok=True)
+        content_path.write_text(content.model_dump_json(indent=2), encoding="utf-8")
+        self._sync_selected_review_with_lesson(job, content)
+        self._render_document(job, content)
+        self.db.commit()
+        return content
 
     def _render_document(self, job: Job, lesson: LessonContent) -> tuple[Path, Path]:
         project = self.db.get(Project, job.project_id)
@@ -635,15 +661,19 @@ def is_mostly_dark_frame(frame_path: object, dark_threshold: int = 28, min_dark_
 
 def build_review_segments(db: Session, storage: StorageService, job: Job, transcript: TranscriptData | None = None) -> list[dict]:
     rows = db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id).order_by(KeyMoment.timestamp).all()
+    lesson_by_moment_id = lesson_chapter_by_selected_moment(db, storage, job)
     result = []
     for moment in rows:
         frame = next((item for item in moment.frames if item.selected), moment.frames[0] if moment.frames else None)
         segments = transcript_segments_between(transcript, moment.chapter.start_time, moment.chapter.end_time) if transcript else []
+        lesson_chapter = lesson_by_moment_id.get(moment.id)
+        title = lesson_chapter.title if lesson_chapter else moment.title
+        summary = strip_rich_text(lesson_chapter.summary) if lesson_chapter else moment.reason
         result.append(
             {
                 "id": moment.id,
-                "title": moment.title,
-                "summary": moment.reason,
+                "title": title,
+                "summary": summary or moment.reason,
                 "start": moment.chapter.start_time,
                 "end": moment.chapter.end_time,
                 "segments": segments,
@@ -662,6 +692,27 @@ def build_review_segments(db: Session, storage: StorageService, job: Job, transc
     return [{key: value for key, value in item.items() if key != "segments"} for item in result]
 
 
+def lesson_chapter_by_selected_moment(db: Session, storage: StorageService, job: Job) -> dict[str, object]:
+    content_path = storage.job_dir(job.id) / "html" / "editable_document.json"
+    if not content_path.exists():
+        return {}
+    try:
+        lesson = LessonContent.model_validate_json(content_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.debug("Could not load editable document for review segment labels: %s", content_path, exc_info=True)
+        return {}
+    selected = (
+        db.query(KeyMoment)
+        .join(Chapter)
+        .filter(Chapter.project_id == job.project_id, KeyMoment.selected.is_(True))
+        .order_by(KeyMoment.timestamp)
+        .all()
+    )
+    if len(selected) != len(lesson.chapters):
+        return {}
+    return {moment.id: chapter for moment, chapter in zip(selected, lesson.chapters)}
+
+
 def build_selected_windows(db: Session, job: Job, transcript: TranscriptData) -> list[dict]:
     moments = db.query(KeyMoment).join(Chapter).filter(Chapter.project_id == job.project_id, KeyMoment.selected.is_(True)).order_by(KeyMoment.timestamp).all()
     if not moments:
@@ -673,6 +724,14 @@ def build_selected_windows(db: Session, job: Job, transcript: TranscriptData) ->
         segments = transcript_segments_between(transcript, start, end)
         windows.append({"id": moment.id, "title": moment.title, "summary": moment.reason, "start": start, "end": end, "segments": segments})
     return windows
+
+
+def strip_rich_text(value: str) -> str:
+    text = re.sub(r"<\s*br\s*/?\s*>", " ", value or "", flags=re.IGNORECASE)
+    text = re.sub(r"</\s*(p|div|li)\s*>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 def selected_frame_dicts(db: Session, storage: StorageService, job: Job) -> list[dict]:

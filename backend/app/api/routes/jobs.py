@@ -200,6 +200,12 @@ def get_document_draft(job_id: str, db: Session = Depends(get_db)) -> LessonCont
     return LessonContent.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+@router.put("/{job_id}/document-draft", response_model=LessonContent)
+def update_document_draft(job_id: str, content: LessonContent, db: Session = Depends(get_db)) -> LessonContent:
+    require_job(db, job_id)
+    return JobService(db).save_document_draft(job_id, content)
+
+
 @router.post("/{job_id}/pdf")
 def create_pdf_from_edited_content(job_id: str, content: LessonContent, db: Session = Depends(get_db)) -> FileResponse:
     require_job(db, job_id)

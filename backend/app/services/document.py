@@ -2,8 +2,10 @@ from pathlib import Path
 import re
 import logging
 from html import escape
+from html.parser import HTMLParser
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 
 from app.core.config import settings
 from app.schemas.pipeline import LessonContent
@@ -15,6 +17,7 @@ class DocumentGenerator:
     def __init__(self, template_dir: Path | None = None):
         root = template_dir or Path(__file__).resolve().parents[1] / "templates"
         self.env = Environment(loader=FileSystemLoader(root), autoescape=select_autoescape(["html", "xml"]))
+        self.env.filters["rich_text"] = rich_text_html
 
     def render_html(
         self,
@@ -122,9 +125,9 @@ class DocumentGenerator:
                     story.append(Paragraph("학습 목표", styles["h3"]))
                     story.append(self._list_flowable(chapter.learning_objectives, styles))
                     story.append(Paragraph("개념 설명", styles["h3"]))
-                    story.append(Paragraph(self._p(chapter.explanation), styles["body"]))
+                    story.append(Paragraph(self._rich_p(chapter.explanation), styles["body"]))
                     story.append(Paragraph("쉽게 이해하기", styles["h3"]))
-                    story.append(Paragraph(self._p(chapter.beginner_explanation), styles["callout"]))
+                    story.append(Paragraph(self._rich_p(chapter.beginner_explanation), styles["callout"]))
                     story.append(Spacer(1, 4 * mm))
                     story.append(Paragraph("핵심 포인트", styles["h3"]))
                     story.append(self._list_flowable(chapter.key_points, styles))
@@ -154,7 +157,7 @@ class DocumentGenerator:
                         )
                         story.append(table)
                     story.append(Paragraph("한 줄 정리", styles["h3"]))
-                    story.append(Paragraph(self._p(chapter.summary), styles["body"]))
+                    story.append(Paragraph(self._rich_p(chapter.summary), styles["body"]))
                     story.append(Spacer(1, 8 * mm))
 
                 story.append(Paragraph("마지막 정리", styles["h2"]))
@@ -308,3 +311,142 @@ class DocumentGenerator:
 
     def _p(self, text: str) -> str:
         return escape(re.sub(r"\s+", " ", text or "").strip())
+
+    def _rich_p(self, text: str) -> str:
+        return rich_text_reportlab(text)
+
+
+class _RichTextSanitizer(HTMLParser):
+    def __init__(self, *, reportlab: bool = False):
+        super().__init__(convert_charrefs=False)
+        self.reportlab = reportlab
+        self.parts: list[str] = []
+        self.list_index_stack: list[int] = []
+        self.span_tag_stack: list[list[str]] = []
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style"}:
+            self.skip_depth += 1
+            return
+        if self.skip_depth:
+            return
+        if tag in {"b", "strong", "i", "em", "u"}:
+            self.parts.append(f"<{self._output_tag(tag)}>")
+        elif tag == "span":
+            output_tags = self._inline_style_tags(attrs)
+            self.span_tag_stack.append(output_tags)
+            for output_tag in output_tags:
+                self.parts.append(f"<{output_tag}>")
+        elif tag == "br":
+            self.parts.append("<br/>" if self.reportlab else "<br>")
+        elif tag in {"p", "div"}:
+            if self.reportlab and self._has_content():
+                self.parts.append("<br/>")
+            elif not self.reportlab:
+                self.parts.append("<p>")
+        elif tag == "ul" and not self.reportlab:
+            self.parts.append("<ul>")
+        elif tag == "ol":
+            if self.reportlab:
+                self.list_index_stack.append(0)
+            else:
+                self.parts.append("<ol>")
+        elif tag == "li":
+            if self.reportlab:
+                if self.list_index_stack:
+                    self.list_index_stack[-1] += 1
+                    marker = f"{self.list_index_stack[-1]}. "
+                else:
+                    marker = "- "
+                if self._has_content():
+                    self.parts.append("<br/>")
+                self.parts.append(escape(marker))
+            else:
+                self.parts.append("<li>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style"}:
+            self.skip_depth = max(self.skip_depth - 1, 0)
+            return
+        if self.skip_depth:
+            return
+        if tag in {"b", "strong", "i", "em", "u"}:
+            self.parts.append(f"</{self._output_tag(tag)}>")
+        elif tag == "span":
+            output_tags = self.span_tag_stack.pop() if self.span_tag_stack else []
+            for output_tag in reversed(output_tags):
+                self.parts.append(f"</{output_tag}>")
+        elif tag in {"p", "div"} and not self.reportlab:
+            self.parts.append("</p>")
+        elif tag in {"ul", "ol"}:
+            if self.reportlab and tag == "ol" and self.list_index_stack:
+                self.list_index_stack.pop()
+            elif not self.reportlab:
+                self.parts.append(f"</{tag}>")
+        elif tag == "li" and not self.reportlab:
+            self.parts.append("</li>")
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth:
+            return
+        if data:
+            self.parts.append(escape(data))
+
+    def handle_entityref(self, name: str) -> None:
+        self.parts.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self.parts.append(f"&#{name};")
+
+    def value(self) -> str:
+        value = "".join(self.parts).strip()
+        if self.reportlab:
+            value = re.sub(r"^(<br\s*/?>\s*)+", "", value, flags=re.IGNORECASE)
+        return value
+
+    def _has_content(self) -> bool:
+        return bool(re.sub(r"<[^>]+>|\s+", "", "".join(self.parts)))
+
+    def _output_tag(self, tag: str) -> str:
+        if self.reportlab:
+            return {"strong": "b", "em": "i"}.get(tag, tag)
+        return tag
+
+    def _inline_style_tags(self, attrs: list[tuple[str, str | None]]) -> list[str]:
+        style = next((value or "" for name, value in attrs if name.lower() == "style"), "")
+        style = style.lower().replace(" ", "")
+        tags = []
+        if re.search(r"font-weight:(bold|[6-9]00)", style):
+            tags.append("b")
+        if "font-style:italic" in style:
+            tags.append("i")
+        if "text-decoration:underline" in style or "text-decoration-line:underline" in style:
+            tags.append("u")
+        return tags
+
+
+def _looks_like_html(text: str) -> bool:
+    return bool(re.search(r"</?(?:b|strong|i|em|u|span|br|p|div|ul|ol|li)\b", text or "", flags=re.IGNORECASE))
+
+
+def rich_text_html(text: str) -> Markup:
+    raw = text or ""
+    if not _looks_like_html(raw):
+        return Markup(escape(raw).replace("\n", "<br>"))
+    sanitizer = _RichTextSanitizer(reportlab=False)
+    sanitizer.feed(raw)
+    sanitizer.close()
+    return Markup(sanitizer.value())
+
+
+def rich_text_reportlab(text: str) -> str:
+    raw = text or ""
+    if not _looks_like_html(raw):
+        return escape(re.sub(r"\s+", " ", raw).strip())
+    sanitizer = _RichTextSanitizer(reportlab=True)
+    sanitizer.feed(raw)
+    sanitizer.close()
+    return sanitizer.value() or "내용 없음"

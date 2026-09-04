@@ -80,9 +80,9 @@
         <h3>학습 목표</h3>
         <ul>{% for goal in chapter.learning_objectives %}<li>{{ goal }}</li>{% endfor %}</ul>
         <h3>개념 설명</h3>
-        <p>{{ chapter.explanation }}</p>
+        <div>{{ chapter.explanation | rich_text }}</div>
         <h3>쉽게 이해하기</h3>
-        <div class="callout explain-callout">{{ chapter.beginner_explanation }}</div>
+        <div class="callout explain-callout">{{ chapter.beginner_explanation | rich_text }}</div>
         <h3>핵심 포인트</h3>
         <ul>{% for point in chapter.key_points %}<li>{{ point }}</li>{% endfor %}</ul>
         <h3>주요 용어</h3>
@@ -91,7 +91,7 @@
           <tbody>{% for item in chapter.terms %}<tr><td>{{ item.term }}</td><td>{{ item.definition }}</td></tr>{% endfor %}</tbody>
         </table>
         <h3>한 줄 정리</h3>
-        <p>{{ chapter.summary }}</p>
+        <div>{{ chapter.summary | rich_text }}</div>
       </article>
     {% endfor %}
 

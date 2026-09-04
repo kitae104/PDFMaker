@@ -3,7 +3,7 @@ from pypdf import PdfReader
 from urllib.parse import unquote, urlparse
 
 from app.schemas.pipeline import LessonChapter, LessonContent
-from app.services.document import DocumentGenerator
+from app.services.document import DocumentGenerator, rich_text_html, rich_text_reportlab
 
 
 def test_pdf_generation_fallback(tmp_path):
@@ -108,6 +108,21 @@ def test_render_html_adds_spacing_after_easy_explanation(tmp_path):
 
     assert ".explain-callout { margin-bottom: 34px; }" in html
     assert '<div class="callout explain-callout">쉽게 이해할 수 있는 설명입니다.</div>' in html
+
+
+def test_rich_text_allows_basic_editor_markup_and_strips_scripts():
+    value = '<b>중요</b><span style="font-weight: 700;">강조</span><script>alert(1)</script><ul><li>핵심</li></ul>'
+    html = rich_text_html(value)
+    reportlab = rich_text_reportlab(value)
+
+    assert "<b>중요</b>" in str(html)
+    assert "<b>강조</b>" in str(html)
+    assert "<script>" not in str(html)
+    assert "<li>핵심</li>" in str(html)
+    assert "<b>중요</b>" in reportlab
+    assert "<b>강조</b>" in reportlab
+    assert "<script>" not in reportlab
+    assert "- 핵심" in reportlab
 
 
 def test_storage_image_src_converts_to_platform_path(tmp_path, monkeypatch):
