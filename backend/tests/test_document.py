@@ -107,6 +107,9 @@ def test_render_html_adds_spacing_after_easy_explanation(tmp_path):
     html = output.read_text(encoding="utf-8")
 
     assert ".explain-callout { margin-bottom: 34px; }" in html
+    assert "<ol><li>장면</li></ol>" in html
+    assert "<ol><li>1. 장면</li></ol>" not in html
+    assert '<h2 class="chapter-heading">1. 장면</h2>' in html
     assert '<div class="callout explain-callout">쉽게 이해할 수 있는 설명입니다.</div>' in html
 
 

@@ -18,6 +18,7 @@ class DocumentGenerator:
         root = template_dir or Path(__file__).resolve().parents[1] / "templates"
         self.env = Environment(loader=FileSystemLoader(root), autoescape=select_autoescape(["html", "xml"]))
         self.env.filters["rich_text"] = rich_text_html
+        self.env.filters["toc_title"] = toc_title
 
     def render_html(
         self,
@@ -430,6 +431,10 @@ class _RichTextSanitizer(HTMLParser):
 
 def _looks_like_html(text: str) -> bool:
     return bool(re.search(r"</?(?:b|strong|i|em|u|span|br|p|div|ul|ol|li)\b", text or "", flags=re.IGNORECASE))
+
+
+def toc_title(text: str) -> str:
+    return re.sub(r"^\s*\d+\s*[.)]\s*", "", text or "").strip() or (text or "")
 
 
 def rich_text_html(text: str) -> Markup:

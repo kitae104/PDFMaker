@@ -67,7 +67,7 @@
     <h3>학습 목표</h3>
     <ul>{% for goal in content.learning_objectives %}<li>{{ goal }}</li>{% endfor %}</ul>
     <h3>목차</h3>
-    <ol>{% for chapter in content.chapters %}<li>{{ chapter.title }}</li>{% endfor %}</ol>
+    <ol>{% for chapter in content.chapters %}<li>{{ chapter.title | toc_title }}</li>{% endfor %}</ol>
 
     {% for chapter in content.chapters %}
       <article class="chapter">
