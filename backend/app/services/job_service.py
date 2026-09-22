@@ -9,19 +9,33 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.exceptions import AppError
 from app.models.entities import Chapter, Frame, GeneratedDocument, Job, JobStatus, KeyMoment, Project, SourceType, Transcript
 from app.schemas.jobs import GenerationOptions
 from app.schemas.pipeline import ChapterAnalysis, KeyMomentAnalysis, LessonContent, TranscriptData, TranscriptSegment
 from app.services.document import DocumentGenerator
+from app.services.llm.mock import MockLLMProvider
 from app.services.llm.providers import get_llm_provider
 from app.services.storage import StorageService
 from app.services.transcript_parser import normalize_transcript_segments, parse_transcript_file
+from app.services.transcription.mock import MockTranscriptionProvider
 from app.services.transcription.providers import get_transcription_provider
 from app.services.video import VideoService
 from app.services.vision.providers import get_vision_provider
 from app.services.youtube import analyze_youtube_url, download_youtube_video, fetch_youtube_transcript
 
 logger = logging.getLogger(__name__)
+
+MOCK_LLM_WARNING = (
+    "LLM이 mock으로 설정되어 실제 AI 대신 규칙 기반 예시 내용으로 노트를 생성했습니다. "
+    "실제 요약이 필요하면 LLM_PROVIDER와 API 키를 설정하세요."
+)
+MOCK_STT_VIDEO_WARNING = (
+    "음성 인식이 아직 mock이라 영상 업로드는 실제 대본 대신 예시 문장으로 처리됩니다. "
+    "정확한 노트가 필요하면 자막 파일을 사용하세요"
+)
+# LLM fallback warnings for lesson generation contain this phrase; a new draft replaces them.
+LESSON_WARNING_MARKER = "본문 생성"
 
 
 STATUS_PROGRESS = {
@@ -159,15 +173,14 @@ class JobRunner:
                 audio_path = self.video.extract_audio(source_path, job_dir / "audio" / "audio.wav")
                 self._status(job, JobStatus.TRANSCRIBING)
                 transcript = self.stt.transcribe(audio_path, float(metadata.get("duration") or 0))
+                if isinstance(self.stt, MockTranscriptionProvider):
+                    self._add_warnings(job, [MOCK_STT_VIDEO_WARNING])
             elif project.source_type == SourceType.YOUTUBE:
                 metadata = analyze_youtube_url(project.source_url or "")
                 self._status(job, JobStatus.TRANSCRIBING)
-                try:
-                    transcript = fetch_youtube_transcript(project.source_url or "")
-                except Exception:
-                    logger.exception("[JOB %s] failed to fetch YouTube transcript; using fallback transcript", job.id)
-                    transcript = None
-                transcript = transcript or self._youtube_transcript(project.title, project.source_url or "", metadata)
+                # Raises YouTubeTranscriptUnavailableError (user-facing message) -> FAILED.
+                # No placeholder transcript: notes built from a notice text are misleading.
+                transcript = fetch_youtube_transcript(project.source_url or "")
                 try:
                     source_path = download_youtube_video(project.source_url or "", job_dir / "source")
                 except Exception:
@@ -191,11 +204,14 @@ class JobRunner:
             self.db.add(Transcript(project_id=project.id, language=transcript.language, duration=transcript.duration, content_path=str(transcript_path)))
 
             self._status(job, JobStatus.ANALYZING_TRANSCRIPT)
+            if isinstance(self.llm, MockLLMProvider):
+                self._add_warnings(job, [MOCK_LLM_WARNING])
             self.llm.analyze_transcript(transcript)
 
             self._status(job, JobStatus.SELECTING_KEY_MOMENTS)
             self._status(job, JobStatus.CAPTURING_FRAMES)
             self._create_scene_review(project.id, source_path, job_dir, transcript, metadata)
+            self._record_llm_warnings(job)
 
             job.status = JobStatus.REVIEW_READY
             job.progress = STATUS_PROGRESS[JobStatus.REVIEW_READY]
@@ -204,6 +220,8 @@ class JobRunner:
             logger.info("[JOB %s] review ready", job.id)
         except Exception as exc:
             logger.exception("[JOB %s] failed", job_id)
+            self.db.rollback()
+            self._record_llm_warnings(job)
             job.status = JobStatus.FAILED
             job.progress = max(job.progress, 1)
             job.error_message = user_safe_error(exc)
@@ -216,16 +234,16 @@ class JobRunner:
         self.db.commit()
         logger.info("[JOB %s] %s", job.id, status.value)
 
-    def _youtube_transcript(self, title: str, url: str, metadata: dict) -> TranscriptData:
-        channel = metadata.get("channel") or "Unknown channel"
-        segments = [
-            TranscriptSegment(start=0, end=45, text=f"이 자료는 YouTube 영상 '{title}'의 학습 노트 생성을 위해 준비되었습니다."),
-            TranscriptSegment(start=45, end=110, text=f"영상 출처는 {channel} 채널이며 URL은 {url} 입니다."),
-            TranscriptSegment(start=110, end=190, text="현재 로컬 MVP는 플랫폼 정책을 고려하여 원본 영상을 자동 다운로드하지 않고 메타데이터와 Mock 분석 흐름을 사용합니다."),
-            TranscriptSegment(start=190, end=260, text="실제 강의 내용 기반 자료가 필요하면 같은 화면에서 원본 MP4 또는 Transcript 파일을 함께 업로드할 수 있습니다."),
-            TranscriptSegment(start=260, end=320, text="Mock Provider는 Chapter, Key Moment, HTML 미리보기, PDF 생성 흐름을 검증하기 위한 예시 콘텐츠를 생성합니다."),
-        ]
-        return TranscriptData(language="ko", duration=320, segments=segments)
+    def _add_warnings(self, job: Job, warnings: list[str], replace_containing: str | None = None) -> None:
+        if not warnings and not replace_containing:
+            return
+        try:
+            self.storage.add_warnings(job.id, warnings, replace_containing=replace_containing)
+        except Exception:
+            logger.exception("[JOB %s] failed to store job warnings", job.id)
+
+    def _record_llm_warnings(self, job: Job, replace_containing: str | None = None) -> None:
+        self._add_warnings(job, self.llm.drain_fallback_warnings(), replace_containing=replace_containing)
 
     def _create_scene_review(self, project_id: str, source_path: Path, job_dir: Path, transcript: TranscriptData, metadata: dict) -> None:
         self._delete_existing_review(project_id)
@@ -291,6 +309,7 @@ class JobRunner:
                 }
             )
         summaries = self.llm.summarize_scene_windows(windows)
+        self._record_llm_warnings(job)
         summary_by_id = {scene.id: scene for scene in summaries.scenes}
         for moment in rows:
             scene_summary = summary_by_id.get(moment.id)
@@ -320,19 +339,41 @@ class JobRunner:
         transcript = load_transcript(self.db, job)
         windows = build_selected_windows(self.db, job, transcript)
         options = GenerationOptions.model_validate_json(job.options_json)
-        self._status(job, JobStatus.GENERATING_CONTENT)
-        lesson = self.llm.generate_lesson_from_scene_windows(project.title if project else "Lecture Notes", transcript, windows, options)
-        self._sync_selected_review_with_lesson(job, lesson)
-        job_dir = self.storage.job_dir(job.id)
-        content_path = job_dir / "html" / "editable_document.json"
-        content_path.parent.mkdir(parents=True, exist_ok=True)
-        content_path.write_text(lesson.model_dump_json(indent=2), encoding="utf-8")
-        self._status(job, JobStatus.GENERATING_HTML)
-        self._render_document(job, lesson)
-        job.status = JobStatus.DOCUMENT_READY
-        job.progress = STATUS_PROGRESS[JobStatus.DOCUMENT_READY]
-        self.db.commit()
-        return lesson
+        previous_status = job.status
+        try:
+            self._status(job, JobStatus.GENERATING_CONTENT)
+            lesson = self.llm.generate_lesson_from_scene_windows(project.title if project else "Lecture Notes", transcript, windows, options)
+            # A fresh draft replaces warnings left by the previous lesson generation.
+            self._record_llm_warnings(job, replace_containing=LESSON_WARNING_MARKER)
+            if isinstance(self.llm, MockLLMProvider):
+                self._add_warnings(job, [MOCK_LLM_WARNING])
+            self._sync_selected_review_with_lesson(job, lesson)
+            job_dir = self.storage.job_dir(job.id)
+            content_path = job_dir / "html" / "editable_document.json"
+            content_path.parent.mkdir(parents=True, exist_ok=True)
+            content_path.write_text(lesson.model_dump_json(indent=2), encoding="utf-8")
+            self._status(job, JobStatus.GENERATING_HTML)
+            self._render_document(job, lesson)
+            job.status = JobStatus.DOCUMENT_READY
+            job.progress = STATUS_PROGRESS[JobStatus.DOCUMENT_READY]
+            job.error_message = None
+            self.db.commit()
+            return lesson
+        except Exception as exc:
+            error = self._restore_stable_status(job_id, self._draft_failure_status(job_id, previous_status), exc)
+            if error is exc:
+                raise
+            raise error from exc
+
+    def _draft_failure_status(self, job_id: str, previous_status: JobStatus) -> JobStatus:
+        """Regenerating a draft that already existed must not hide it: the ResultsPage only
+        loads the editable draft in DOCUMENT_READY/COMPLETED, so fall back there when a draft
+        file is still on disk. First-time failures go back to REVIEW_READY."""
+        if previous_status in (JobStatus.DOCUMENT_READY, JobStatus.COMPLETED):
+            content_path = self.storage.job_dir(job_id) / "html" / "editable_document.json"
+            if content_path.is_file():
+                return JobStatus.DOCUMENT_READY
+        return JobStatus.REVIEW_READY
 
     def _sync_selected_review_with_lesson(self, job: Job, lesson: LessonContent) -> None:
         moments = (
@@ -353,23 +394,46 @@ class JobRunner:
         job = self.db.get(Job, job_id)
         if not job:
             raise RuntimeError("Missing job")
-        self.save_document_draft(job_id, content)
-        self._status(job, JobStatus.GENERATING_HTML)
-        html_path, pdf_path = self._render_document(job, content)
-        self._status(job, JobStatus.GENERATING_PDF)
-        project = self.db.get(Project, job.project_id)
-        self.document.generate_pdf(
-            html_path,
-            pdf_path,
-            content=content,
-            frames=selected_frame_dicts(self.db, self.storage, job),
-            project={"title": project.title if project else content.title},
-        )
-        job.status = JobStatus.COMPLETED
-        job.progress = 100
-        job.completed_at = datetime.utcnow()
-        self.db.commit()
-        return pdf_path
+        try:
+            self.save_document_draft(job_id, content)
+            self._status(job, JobStatus.GENERATING_HTML)
+            html_path, pdf_path = self._render_document(job, content)
+            self._status(job, JobStatus.GENERATING_PDF)
+            project = self.db.get(Project, job.project_id)
+            self.document.generate_pdf(
+                html_path,
+                pdf_path,
+                content=content,
+                frames=selected_frame_dicts(self.db, self.storage, job),
+                project={"title": project.title if project else content.title},
+            )
+            job.status = JobStatus.COMPLETED
+            job.progress = 100
+            job.error_message = None
+            job.completed_at = datetime.utcnow()
+            self.db.commit()
+            return pdf_path
+        except Exception as exc:
+            error = self._restore_stable_status(job_id, JobStatus.DOCUMENT_READY, exc)
+            if error is exc:
+                raise
+            raise error from exc
+
+    def _restore_stable_status(self, job_id: str, status: JobStatus, exc: Exception) -> AppError:
+        """Synchronous routes must not leave a job stuck in GENERATING_*: go back to the
+        last stable status so the user can retry, record the error, and return an AppError."""
+        logger.exception("[JOB %s] synchronous step failed; restoring %s", job_id, status.value)
+        self.db.rollback()
+        message = user_safe_error(exc)
+        job = self.db.get(Job, job_id)
+        if job:
+            job.status = status
+            job.progress = STATUS_PROGRESS[status]
+            job.error_message = message
+            self.db.commit()
+        if isinstance(exc, AppError):
+            return exc
+        return AppError(message, 500)
 
     def save_document_draft(self, job_id: str, content: LessonContent) -> LessonContent:
         job = self.db.get(Job, job_id)
@@ -495,6 +559,8 @@ def capture_offsets(offset: int, count: int) -> list[float]:
 
 
 def user_safe_error(exc: Exception) -> str:
+    if isinstance(exc, AppError):
+        return exc.message
     message = str(exc)
     if "ffmpeg" in message.lower():
         return "영상 처리 도구를 실행하는 중 문제가 발생했습니다. FFmpeg 설치 상태를 확인해주세요."

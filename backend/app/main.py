@@ -6,9 +6,11 @@ from app.api.routes import health, jobs, youtube
 from app.core.config import settings
 from app.core.database import Base, engine
 from app.core.exceptions import register_exception_handlers
+from app.services.llm.providers import validate_llm_settings
 
 
 def create_app() -> FastAPI:
+    validate_llm_settings()
     Base.metadata.create_all(bind=engine)
     app = FastAPI(title=settings.app_name)
     app.add_middleware(

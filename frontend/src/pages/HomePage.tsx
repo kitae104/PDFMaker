@@ -16,11 +16,11 @@ import {
   Wrench
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { analyzeYouTube, apiUrl, createTranscriptJob, createVideoJob, createYouTubeJob, getHealth, listJobs } from '../api/client';
+import { analyzeYouTube, apiUrl, createTranscriptJob, createVideoJob, createYouTubeJob, getHealth, getLLMHealth, listJobs } from '../api/client';
 import { ProgressSteps } from '../components/ProgressSteps';
 import { useJobStore } from '../stores/jobs';
 import { statusLabel } from '../utils/format';
-import type { Job, YouTubeMetadata } from '../types';
+import type { HealthResponse, Job, LLMHealthResponse, YouTubeMetadata } from '../types';
 
 type InputMode = 'youtube' | 'video' | 'transcript';
 
@@ -33,6 +33,10 @@ const DEFAULT_GENERATION_OPTIONS = {
 export function HomePage() {
   const [mode, setMode] = useState<InputMode>('youtube');
   const [health, setHealth] = useState<string>('점검 중');
+  const [healthInfo, setHealthInfo] = useState<HealthResponse | null>(null);
+  const [llmCheck, setLlmCheck] = useState<LLMHealthResponse | null>(null);
+  const [llmCheckError, setLlmCheckError] = useState('');
+  const [isCheckingLlm, setIsCheckingLlm] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState('https://youtu.be/JKj7eTi0Axo?si=AJrOgnxr5x_fSOlP');
   const [youtubeHasRights, setYoutubeHasRights] = useState(true);
@@ -47,7 +51,12 @@ export function HomePage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    getHealth().then((data) => setHealth(`${data.database} 연결됨`)).catch(() => setHealth('서버 연결 필요'));
+    getHealth()
+      .then((data) => {
+        setHealth(`${data.database} 연결됨`);
+        setHealthInfo(data);
+      })
+      .catch(() => setHealth('서버 연결 필요'));
     listJobs().then(setRecentJobs).catch(() => undefined);
   }, [setRecentJobs]);
 
@@ -94,6 +103,26 @@ export function HomePage() {
     }
   }
 
+  async function checkLlm() {
+    setIsCheckingLlm(true);
+    setLlmCheck(null);
+    setLlmCheckError('');
+    try {
+      setLlmCheck(await getLLMHealth());
+    } catch {
+      setLlmCheckError('AI 연결 점검 요청을 보내지 못했습니다. 서버 연결을 확인해주세요.');
+    } finally {
+      setIsCheckingLlm(false);
+    }
+  }
+
+  const isMockLlm = healthInfo?.llm_provider === 'mock';
+  const llmLabel = healthInfo
+    ? isMockLlm
+      ? 'LLM: mock(실제 AI 미사용)'
+      : `LLM: ${healthInfo.llm_provider}${healthInfo.llm_model ? ` · ${healthInfo.llm_model}` : ''}`
+    : null;
+
   async function confirmYouTube() {
     setYoutubeMessage('');
     setIsAnalyzingYoutube(true);
@@ -127,9 +156,53 @@ export function HomePage() {
                   <p className="text-xs font-bold text-white/55">영상 분석에서 교재 출고까지</p>
                 </div>
               </div>
-              <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-xs font-black text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur">
-                {health}
-              </span>
+              <div className="flex min-w-0 flex-col items-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-xs font-black text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur">
+                    {health}
+                  </span>
+                  {llmLabel && (
+                    <span
+                      className={`break-all rounded-full border px-3 py-1.5 text-xs font-black backdrop-blur ${
+                        isMockLlm ? 'border-amber-300/50 bg-amber-300/15 text-amber-100' : 'border-lime-300/25 bg-lime-300/10 text-lime-100'
+                      }`}
+                    >
+                      {llmLabel}
+                    </span>
+                  )}
+                  {healthInfo && (
+                    <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/70 backdrop-blur">
+                      STT: {healthInfo.stt_provider}
+                    </span>
+                  )}
+                  {healthInfo && (
+                    <button
+                      type="button"
+                      onClick={checkLlm}
+                      disabled={isCheckingLlm}
+                      className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-black text-white transition hover:bg-white/20 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {isCheckingLlm ? '점검 중...' : 'AI 연결 점검'}
+                    </button>
+                  )}
+                </div>
+                {llmCheck && (
+                  <p
+                    className={`max-w-sm break-keep rounded-lg border px-3 py-2 text-right text-xs font-bold ${
+                      llmCheck.ok ? 'border-lime-300/30 bg-lime-300/10 text-lime-100' : 'border-red-300/40 bg-red-400/15 text-red-100'
+                    }`}
+                  >
+                    {llmCheck.ok
+                      ? llmCheck.provider === 'mock'
+                        ? 'mock 모드입니다. 실제 AI는 호출되지 않습니다.'
+                        : `AI 연결 정상 (${llmCheck.provider}${llmCheck.model ? ` · ${llmCheck.model}` : ''}${llmCheck.latency_ms !== null ? `, ${llmCheck.latency_ms}ms` : ''})`
+                      : `AI 연결 실패 (${llmCheck.provider}): ${llmCheck.error ?? '알 수 없는 오류'}`}
+                  </p>
+                )}
+                {llmCheckError && (
+                  <p className="max-w-sm break-keep rounded-lg border border-red-300/40 bg-red-400/15 px-3 py-2 text-right text-xs font-bold text-red-100">{llmCheckError}</p>
+                )}
+              </div>
             </nav>
 
             <div className="max-w-2xl pb-8 pt-14 lg:pb-16">

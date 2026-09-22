@@ -1,6 +1,8 @@
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
+from app.core.config import settings
 from app.schemas.pipeline import TranscriptData, TranscriptSegment
 
 
@@ -17,6 +19,44 @@ COMMON_TRANSCRIPT_CORRECTIONS = {
     "산하철": "산화철",
     "이산화 티탐": "이산화 티타늄",
 }
+
+# Automotive painting vocabulary. COMMON_TRANSCRIPT_CORRECTIONS are only safe for this domain
+# (e.g. "한류" -> "안료" would corrupt a K-culture transcript).
+AUTOMOTIVE_PAINT_KEYWORDS = (
+    "도료",
+    "도장",
+    "페인트",
+    "안료",
+    "클리어코트",
+    "클리어 코트",
+    "프라이머",
+    "우레탄",
+    "자동차",
+    "도막",
+    "경화제",
+    "첨가제",
+    "부착력",
+    "광택",
+    "산화철",
+    "티타늄",
+    "판금",
+    "차체",
+)
+DOMAIN_KEYWORD_MIN_DISTINCT = 2
+
+
+def should_apply_domain_corrections(texts: Iterable[str]) -> bool:
+    profile = (settings.transcript_correction_profile or "auto").strip().lower()
+    if profile == "none":
+        return False
+    if profile == "automotive":
+        return True
+    # "auto": keywords are counted after tentative correction so common mis-hearings
+    # ("알료", "베인드") still count as evidence for the domain.
+    combined = " ".join(str(text or "") for text in texts)
+    corrected = correct_common_transcript_terms(combined, enabled=True)
+    found = {keyword for keyword in AUTOMOTIVE_PAINT_KEYWORDS if keyword in corrected}
+    return len(found) >= DOMAIN_KEYWORD_MIN_DISTINCT
 
 
 def parse_transcript_file(path: Path) -> TranscriptData:
@@ -84,8 +124,9 @@ def normalize_transcript_segments(segments: list[TranscriptSegment]) -> list[Tra
         current_end = 0.0
         current_tokens = []
 
+    apply_corrections = should_apply_domain_corrections(segment.text for segment in segments)
     for segment in sorted(segments, key=lambda item: (item.start, item.end)):
-        text = normalize_text(segment.text)
+        text = normalize_text(segment.text, apply_corrections)
         if not text:
             continue
         tokens = text.split()
@@ -107,14 +148,16 @@ def normalize_transcript_segments(segments: list[TranscriptSegment]) -> list[Tra
     return cleaned
 
 
-def normalize_text(text: str) -> str:
+def normalize_text(text: str, apply_corrections: bool = True) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\s+", " ", text)
     text = text.strip()
-    return correct_common_transcript_terms(text)
+    return correct_common_transcript_terms(text, enabled=apply_corrections)
 
 
-def correct_common_transcript_terms(text: str) -> str:
+def correct_common_transcript_terms(text: str, enabled: bool = True) -> str:
+    if not enabled:
+        return text
     for source, target in COMMON_TRANSCRIPT_CORRECTIONS.items():
         text = text.replace(source, target)
     return text

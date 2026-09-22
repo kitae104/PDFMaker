@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Chapter, Frame, HealthResponse, Job, KeyMoment, LessonContent, ReviewSegment, Transcript, YouTubeMetadata } from '../types';
+import type { Chapter, Frame, HealthResponse, Job, KeyMoment, LessonContent, LLMHealthResponse, ReviewSegment, Transcript, YouTubeMetadata } from '../types';
 
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '');
 const backendBaseUrl = configuredApiBaseUrl?.replace(/\/api$/, '');
@@ -20,8 +20,34 @@ export const api = axios.create({
   baseURL: apiBaseUrl
 });
 
+/**
+ * Extracts the backend's user-facing `detail` message from a failed request.
+ * Blob responses (PDF download) carry the JSON error body as a Blob.
+ */
+export async function apiErrorMessage(error: unknown, fallback: string): Promise<string> {
+  if (!axios.isAxiosError(error)) return fallback;
+  let data: unknown = error.response?.data;
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    try {
+      data = JSON.parse(await data.text());
+    } catch {
+      return fallback;
+    }
+  }
+  if (data && typeof data === 'object' && 'detail' in data) {
+    const detail = (data as { detail: unknown }).detail;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+  }
+  return fallback;
+}
+
 export async function getHealth() {
   const { data } = await api.get<HealthResponse>('/health');
+  return data;
+}
+
+export async function getLLMHealth() {
+  const { data } = await api.get<LLMHealthResponse>('/health/llm');
   return data;
 }
 

@@ -27,6 +27,7 @@ def to_response(job: Job) -> JobResponse:
         error_message=job.error_message,
         created_at=job.created_at,
         completed_at=job.completed_at,
+        warnings=StorageService().read_warnings(job.id),
     )
 
 

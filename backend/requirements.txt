@@ -14,3 +14,4 @@ pypdf==5.1.0
 pytest==8.3.4
 httpx==0.28.1
 yt-dlp>=2024.12.23
+truststore>=0.10

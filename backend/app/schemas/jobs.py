@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.entities import JobStatus, SourceType
 
@@ -40,9 +40,21 @@ class JobResponse(BaseModel):
     error_message: str | None
     created_at: datetime
     completed_at: datetime | None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):
     status: str
     app_name: str
     database: str
+    llm_provider: str
+    llm_model: str | None
+    stt_provider: str
+
+
+class LLMHealthResponse(BaseModel):
+    ok: bool
+    provider: str
+    model: str | None
+    latency_ms: int | None
+    error: str | None

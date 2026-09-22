@@ -64,7 +64,24 @@ GEMINI_MODEL=gemini-3.7-flash
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 ```
 
-If a selected provider is missing its API key, the backend falls back to mock LLM output so the local pipeline can still run.
+If `LLM_PROVIDER` is `openai`/`gemini` without its API key, or has an unknown value, the backend refuses to start with a clear error. `mock` (and the not-yet-implemented `ollama`) run without keys, and every job then shows a warning that real AI was not used. LLM call failures that fall back to rule-based content, and video uploads processed by the mock STT, are also reported as job warnings on the results screen.
+
+The `.env` file is always read from the repository root, and relative `STORAGE_PATH` / sqlite `DATABASE_URL` paths are resolved against `backend/`, so the working directory does not matter.
+
+Other settings:
+
+```env
+LLM_TIMEOUT_SECONDS=120            # per request
+LLM_MAX_RETRIES=3                  # 429/5xx/timeout retries with backoff (Retry-After respected)
+LLM_USE_SYSTEM_TRUST_STORE=true    # use the OS certificate store (corporate SSL proxies)
+LLM_CA_BUNDLE=                     # optional CA bundle path, overrides the trust store
+GEMINI_REASONING_EFFORT=           # optional, sent only when set
+TRANSCRIPT_CORRECTION_PROFILE=auto # auto | automotive | none
+```
+
+Check the connection with `GET /api/health` (effective provider/model/STT) and `GET /api/health/llm` (one minimal LLM call; returns a classified error such as SSL, 429, timeout, auth or missing model).
+
+YouTube jobs need real captions. If captions cannot be fetched (no captions, or the server IP is blocked by YouTube), the job fails with a message asking you to upload an SRT/VTT file through the transcript input instead.
 
 ## Optional FFmpeg
 

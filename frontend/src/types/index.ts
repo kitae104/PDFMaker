@@ -19,6 +19,17 @@ export interface HealthResponse {
   status: string;
   app_name: string;
   database: string;
+  llm_provider: string;
+  llm_model: string | null;
+  stt_provider: string;
+}
+
+export interface LLMHealthResponse {
+  ok: boolean;
+  provider: string;
+  model: string | null;
+  latency_ms: number | null;
+  error: string | null;
 }
 
 export interface YouTubeMetadata {
@@ -42,6 +53,7 @@ export interface Job {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  warnings: string[];
 }
 
 export interface TranscriptSegment {

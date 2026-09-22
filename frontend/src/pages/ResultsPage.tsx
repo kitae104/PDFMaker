@@ -1,7 +1,8 @@
 import { type ClipboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { Bold, Car, CheckCircle2, CheckSquare, Download, FilePenLine, Film, Gauge, Image as ImageIcon, Italic, List, ListOrdered, Loader2, Square, Underline, Wrench } from 'lucide-react';
+import { AlertTriangle, Bold, Car, CheckCircle2, CheckSquare, Download, FilePenLine, Film, Gauge, Image as ImageIcon, Italic, List, ListOrdered, Loader2, Square, Underline, Wrench } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  apiErrorMessage,
   apiUrl,
   generateDocumentDraft,
   generateEditedPdf,
@@ -135,8 +136,10 @@ export function ResultsPage() {
       setJob(nextJob);
       setPreviewVersion((version) => version + 1);
       setTab('editor');
-    } catch {
-      setErrorMessage('문서 초안을 생성하지 못했습니다.');
+    } catch (error) {
+      // 백엔드는 실패 시 Job을 REVIEW_READY로 되돌리고 error_message를 채운다. 편집 중인 내용은 그대로 둔다.
+      setErrorMessage(await apiErrorMessage(error, '문서 초안을 생성하지 못했습니다.'));
+      await refreshJobQuietly();
     } finally {
       setIsGeneratingDraft(false);
     }
@@ -157,10 +160,21 @@ export function ResultsPage() {
       URL.revokeObjectURL(url);
       setJob(await getJob(jobId));
       setPreviewVersion((version) => version + 1);
-    } catch {
-      setErrorMessage('수정본 PDF를 생성하지 못했습니다.');
+    } catch (error) {
+      // 백엔드는 실패 시 Job을 DOCUMENT_READY로 되돌리고 error_message를 채운다. 편집기는 유지한다.
+      setErrorMessage(await apiErrorMessage(error, '수정본 PDF를 생성하지 못했습니다.'));
+      await refreshJobQuietly();
     } finally {
       setIsDownloadingPdf(false);
+    }
+  }
+
+  async function refreshJobQuietly() {
+    if (!jobId) return;
+    try {
+      setJob(await getJob(jobId));
+    } catch {
+      undefined;
     }
   }
 
@@ -311,7 +325,25 @@ export function ResultsPage() {
           </div>
         </div>
 
+        {job.warnings?.length ? (
+          <div className="mb-4 rounded-lg border border-amber-300/40 bg-amber-300/10 p-4 text-sm text-amber-100">
+            <p className="flex items-center gap-2 font-black text-amber-200">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              확인이 필요한 안내
+            </p>
+            <ul className="mt-2 list-disc space-y-1 pl-6 break-keep leading-6">
+              {job.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {!readyForReview ? <ProgressSteps job={job} /> : null}
+        {readyForReview && job.error_message && job.error_message !== errorMessage ? (
+          <p className="mb-4 break-keep rounded-lg border border-red-300/25 bg-red-400/10 p-3 text-sm text-red-100">
+            최근 작업이 실패했습니다: {job.error_message} 편집 내용은 유지되어 있으니 다시 시도해 주세요.
+          </p>
+        ) : null}
         {errorMessage ? <p className="mb-4 rounded-lg border border-red-300/25 bg-red-400/10 p-3 text-sm text-red-100">{errorMessage}</p> : null}
         {saveMessage ? <p className="mb-4 rounded-lg border border-lime-300/25 bg-lime-300/10 p-3 text-sm font-bold text-lime-100">{saveMessage}</p> : null}
 

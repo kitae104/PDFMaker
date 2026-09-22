@@ -16,3 +16,5 @@ tmp/
 .DS_Store
 
 .vercel
+_workspace/
+_workspace_*/

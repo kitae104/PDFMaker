@@ -1,6 +1,11 @@
 import json
 import logging
 import re
+import ssl
+import time
+from collections.abc import Iterable
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -20,7 +25,7 @@ from app.schemas.pipeline import (
 )
 from app.services.llm.base import LLMProvider
 from app.services.llm.mock import MockLLMProvider, segments_between
-from app.services.transcript_parser import correct_common_transcript_terms
+from app.services.transcript_parser import correct_common_transcript_terms, should_apply_domain_corrections
 from app.services.video import format_timestamp
 
 logger = logging.getLogger(__name__)
@@ -28,6 +33,156 @@ logger = logging.getLogger(__name__)
 LESSON_CHUNK_THRESHOLD = 12
 LESSON_CHUNK_SIZE = 8
 DEFAULT_OPENAI_SETTING = object()
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_BACKOFF_SECONDS = 30.0
+PING_MAX_TOKENS = 256
+PING_TIMEOUT_SECONDS = 30.0
+# timeout·네트워크 오류는 같은 긴 요청을 반복하므로 재시도를 최대 1회로 제한한다(429/5xx는 llm_max_retries 유지).
+MAX_TRANSPORT_RETRIES = 1
+# 서킷 브레이커: 연결 자체가 안 되는 원인으로 연속 이만큼 최종 실패하면 이후 호출은 네트워크 없이 즉시 폴백한다.
+CIRCUIT_BREAKER_THRESHOLD = 2
+CIRCUIT_BREAKER_REASONS = frozenset({"SSL 인증서 검증 실패", "인증 실패(401·403)", "모델 없음(404)", "응답 시간 초과"})
+
+# 테스트에서 monkeypatch로 대기 시간을 없앨 수 있도록 모듈 수준에 둔다.
+_sleep = time.sleep
+
+
+class LLMResponseTruncatedError(RuntimeError):
+    """finish_reason == "length" — max_tokens 한도에서 응답이 잘렸다."""
+
+
+class LLMResponseFormatError(ValueError):
+    """응답 본문이 기대한 chat completion 모양이 아니다."""
+
+
+class LLMCircuitOpenError(RuntimeError):
+    """서킷 브레이커가 열려 네트워크 호출 없이 바로 실패시켰다. reason은 브레이커를 연 원인 분류 문구."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"LLM circuit open ({reason})")
+        self.reason = reason
+
+
+def _setting(name: str, default: Any) -> Any:
+    return getattr(settings, name, default)
+
+
+def _ssl_verify() -> ssl.SSLContext | bool:
+    ca_bundle = _setting("llm_ca_bundle", None)
+    if ca_bundle:
+        return ssl.create_default_context(cafile=str(ca_bundle))
+    if _setting("llm_use_system_trust_store", True):
+        try:
+            import truststore
+        except ImportError:
+            logger.warning("truststore is not installed; using the certifi CA bundle for LLM requests")
+            return True
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    return True
+
+
+def build_http_client(timeout: float | None = None) -> httpx.Client:
+    """LLM 호출용 httpx 클라이언트. CA 번들 지정 > OS 인증서 저장소(truststore) > certifi 순으로 검증한다."""
+    resolved = float(timeout if timeout is not None else _setting("llm_timeout_seconds", 120))
+    return httpx.Client(timeout=httpx.Timeout(resolved, connect=min(resolved, 20.0)), verify=_ssl_verify())
+
+
+def _iter_exception_chain(exc: BaseException) -> Iterable[BaseException]:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _is_ssl_error(exc: BaseException) -> bool:
+    for item in _iter_exception_chain(exc):
+        if isinstance(item, ssl.SSLError):
+            return True
+        if "certificate verify failed" in str(item).lower():
+            return True
+    return False
+
+
+def classify_llm_error(exc: BaseException) -> str:
+    """사용자에게 보여 줄 짧은 원인 분류 문구. 키·URL·예외 원문은 포함하지 않는다."""
+    if isinstance(exc, LLMCircuitOpenError):
+        return exc.reason
+    if isinstance(exc, LLMResponseTruncatedError):
+        return "응답 잘림"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return "요청 한도 초과(429)"
+        if status in (401, 403):
+            return "인증 실패(401·403)"
+        if status == 404:
+            return "모델 없음(404)"
+        return "기타"
+    if _is_ssl_error(exc):
+        return "SSL 인증서 검증 실패"
+    if isinstance(exc, httpx.TimeoutException):
+        return "응답 시간 초과"
+    if isinstance(exc, httpx.TransportError):
+        return "네트워크 오류"
+    if isinstance(exc, (json.JSONDecodeError, ValidationError, KeyError, IndexError, TypeError, ValueError)):
+        return "응답 형식 오류"
+    return "기타"
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    value = response.headers.get("retry-after")
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
+def _backoff_seconds(attempt: int, response: httpx.Response | None = None) -> float:
+    retry_after = _retry_after_seconds(response) if response is not None else None
+    if retry_after is not None:
+        return min(retry_after, MAX_BACKOFF_SECONDS)
+    return min(2.0**attempt, MAX_BACKOFF_SECONDS)
+
+
+def _fallback_message(subject: str, exc: BaseException, replacement: str = "규칙 기반 대체 내용") -> str:
+    return f"{subject}이 실패해 {replacement}을 사용했습니다 (원인: {classify_llm_error(exc)})"
+
+
+def _scene_ranges(numbers: list[int]) -> list[str]:
+    ranges: list[str] = []
+    start: int | None = None
+    previous: int | None = None
+    for number in sorted(set(numbers)):
+        if start is not None and previous is not None and number == previous + 1:
+            previous = number
+            continue
+        if start is not None:
+            ranges.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = number
+    if start is not None:
+        ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    return ranges
+
+
+def _segment_texts(windows: list[dict]) -> list[str]:
+    texts: list[str] = []
+    for window in windows:
+        for segment in window.get("segments", []) or []:
+            text = segment.get("text") if isinstance(segment, dict) else getattr(segment, "text", "")
+            if text:
+                texts.append(str(text))
+    return texts
 
 
 class OpenAILLMProvider(LLMProvider):
@@ -38,6 +193,7 @@ class OpenAILLMProvider(LLMProvider):
         base_url: str | None = None,
         provider_label: str = "OpenAI",
         api_key_name: str = "OPENAI_API_KEY",
+        reasoning_effort: str | None = None,
     ) -> None:
         resolved_api_key = settings.openai_api_key if api_key is DEFAULT_OPENAI_SETTING else api_key
         if not resolved_api_key:
@@ -46,7 +202,12 @@ class OpenAILLMProvider(LLMProvider):
         self.model = model or settings.openai_model
         self.base_url = str(base_url or settings.openai_base_url).rstrip("/")
         self._provider_label = provider_label
+        self.reasoning_effort = reasoning_effort or None
         self.fallback = MockLLMProvider()
+        self._fallback_warnings: list[str] = []
+        # 서킷 브레이커 상태는 인스턴스 단위다. JobRunner가 요청마다 provider를 새로 만들므로 Job 사이에 이어지지 않는다.
+        self._consecutive_connection_failures = 0
+        self._circuit_open_reason: str | None = None
 
     @property
     def provider_label(self) -> str:
@@ -70,8 +231,9 @@ class OpenAILLMProvider(LLMProvider):
         try:
             data = self._chat_json(CHAPTER_SYSTEM_PROMPT, prompt, max_tokens=2200)
             return ChapterAnalysis.model_validate(data)
-        except Exception:
+        except Exception as exc:
             logger.exception("%s chapter generation failed; falling back to mock output", self.provider_label)
+            self._record_fallback_warning(_fallback_message("챕터 구성 생성", exc))
             return self.fallback.generate_chapters(transcript)
 
     def select_key_moments(self, transcript: TranscriptData, chapters: ChapterAnalysis) -> KeyMomentAnalysis:
@@ -91,8 +253,9 @@ class OpenAILLMProvider(LLMProvider):
         try:
             data = self._chat_json(KEY_MOMENT_SYSTEM_PROMPT, prompt, max_tokens=2200)
             return KeyMomentAnalysis.model_validate(data)
-        except Exception:
+        except Exception as exc:
             logger.exception("%s key moment generation failed; falling back to mock output", self.provider_label)
+            self._record_fallback_warning(_fallback_message("핵심 장면 선택", exc))
             return self.fallback.select_key_moments(transcript, chapters)
 
     def generate_lesson_content(
@@ -122,9 +285,33 @@ class OpenAILLMProvider(LLMProvider):
         windows: list[dict],
         options: GenerationOptions,
     ) -> LessonContent:
-        if len(windows) > LESSON_CHUNK_THRESHOLD:
-            return self._generate_lesson_from_windows_in_batches(title, transcript, windows, options)
+        self._scene_failures: list[tuple[int, str]] = []
+        self._apply_corrections = should_apply_domain_corrections(_segment_texts(windows))
+        try:
+            if len(windows) > LESSON_CHUNK_THRESHOLD:
+                return self._generate_lesson_from_windows_in_batches(title, transcript, windows, options)
+            return self._generate_lesson_single_request(title, transcript, windows, options)
+        finally:
+            self._flush_scene_failures()
 
+    def _flush_scene_failures(self) -> None:
+        by_reason: dict[str, list[int]] = {}
+        for scene_number, reason in getattr(self, "_scene_failures", []):
+            by_reason.setdefault(reason, []).append(scene_number)
+        for reason, numbers in by_reason.items():
+            scenes = ", ".join(_scene_ranges(numbers))
+            self._record_fallback_warning(
+                f"장면 {scenes}의 강의 본문 생성이 실패해 규칙 기반 대체 내용을 사용했습니다 (원인: {reason})"
+            )
+        self._scene_failures = []
+
+    def _generate_lesson_single_request(
+        self,
+        title: str,
+        transcript: TranscriptData,
+        windows: list[dict],
+        options: GenerationOptions,
+    ) -> LessonContent:
         scene_inputs = [window_for_prompt(window, max_chars=1300) for window in windows]
         schema = {
             "title": "string",
@@ -160,7 +347,7 @@ class OpenAILLMProvider(LLMProvider):
         )
         try:
             data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=max(5200, min(12000, len(windows) * 750)))
-            lesson = clean_lesson_content(LessonContent.model_validate(data))
+            lesson = clean_lesson_content(LessonContent.model_validate(data), self._corrections_enabled())
             if len(lesson.chapters) != len(windows):
                 chapters = self._repair_lesson_chapter_batch(lesson.chapters, title, windows, options, 1)
                 return LessonContent.model_validate(
@@ -170,8 +357,9 @@ class OpenAILLMProvider(LLMProvider):
                     }
                 )
             return lesson
-        except Exception:
+        except Exception as exc:
             logger.exception("%s lesson generation failed; falling back to mock output", self.provider_label)
+            self._record_fallback_warning(_fallback_message("강의 본문 생성", exc))
             return self.fallback.generate_lesson_from_scene_windows(title, transcript, windows, options)
 
     def _generate_lesson_from_windows_in_batches(
@@ -196,7 +384,8 @@ class OpenAILLMProvider(LLMProvider):
                 chapters=chapters,
                 final_summary=metadata["final_summary"],
                 review_questions=metadata["review_questions"],
-            )
+            ),
+            self._corrections_enabled(),
         )
 
     def _generate_lesson_metadata(
@@ -245,8 +434,9 @@ class OpenAILLMProvider(LLMProvider):
                 "final_summary": string_list(data.get("final_summary"), fallback.final_summary),
                 "review_questions": string_list(data.get("review_questions"), fallback.review_questions),
             }
-        except Exception:
+        except Exception as exc:
             logger.exception("%s lesson metadata generation failed; using fallback metadata", self.provider_label)
+            self._record_fallback_warning(_fallback_message("강의 본문 생성 중 개요·학습 목표·복습 질문 작성", exc))
             return {
                 "title": fallback.title,
                 "overview": fallback.overview,
@@ -377,8 +567,11 @@ class OpenAILLMProvider(LLMProvider):
         try:
             data = self._chat_json(LESSON_SYSTEM_PROMPT, prompt, max_tokens=2200)
             return normalize_chapter_numbers([LessonChapter.model_validate(data.get("chapter", data))], scene_number)[0]
-        except Exception:
+        except Exception as exc:
             logger.exception("%s single scene lesson generation failed; using fallback for scene %s", self.provider_label, scene_number)
+            if not hasattr(self, "_scene_failures"):
+                self._scene_failures = []
+            self._scene_failures.append((scene_number, classify_llm_error(exc)))
             fallback = self.fallback.generate_lesson_from_scene_windows(title, TranscriptData(segments=[], duration=0), [window], options)
             return normalize_chapter_numbers(fallback.chapters, scene_number)[0]
 
@@ -406,9 +599,11 @@ class OpenAILLMProvider(LLMProvider):
         try:
             data = self._chat_json(SCENE_SYSTEM_PROMPT, prompt, max_tokens=max(1000, len(windows) * 180))
             parsed = SceneWindowSummaryList.model_validate(data)
-            return clean_scene_summaries(fill_missing_scene_summaries(windows, parsed))
-        except Exception:
+            apply_corrections = should_apply_domain_corrections(_segment_texts(windows))
+            return clean_scene_summaries(fill_missing_scene_summaries(windows, parsed), apply_corrections)
+        except Exception as exc:
             logger.exception("%s scene summary generation failed; falling back to local summaries", self.provider_label)
+            self._record_fallback_warning(_fallback_message("장면 요약 생성", exc, "규칙 기반 요약"))
             return self.fallback.summarize_scene_windows(windows)
 
     def summarize(self, transcript: TranscriptData) -> str:
@@ -422,12 +617,78 @@ class OpenAILLMProvider(LLMProvider):
             summary = str(data.get("summary") or "").strip()
             if summary:
                 return summary
-        except Exception:
+        except Exception as exc:
             logger.exception("%s transcript summary failed; falling back to mock output", self.provider_label)
+            self._record_fallback_warning(_fallback_message("전체 요약 생성", exc, "규칙 기반 요약"))
         return self.fallback.summarize(transcript)
 
+    def _corrections_enabled(self) -> bool:
+        return bool(getattr(self, "_apply_corrections", False))
+
+    def ping(self) -> None:
+        """연결 점검용 최소 요청 1회. 재시도 없이, 실패하면 예외를 그대로 올린다."""
+        content = self._chat_completion(
+            "Return JSON only.",
+            'Reply with exactly {"ok": true}',
+            max_tokens=PING_MAX_TOKENS,
+            timeout=min(float(_setting("llm_timeout_seconds", 120)), PING_TIMEOUT_SECONDS),
+            max_retries=0,
+            use_circuit_breaker=False,
+        )
+        parse_json_object(content)
+
     def _chat_json(self, system: str, user: str, max_tokens: int) -> dict[str, Any]:
-        payload = {
+        return parse_json_object(self._chat_completion(system, user, max_tokens))
+
+    def _chat_completion(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+        use_circuit_breaker: bool = True,
+    ) -> str:
+        if not use_circuit_breaker:
+            return self._chat_completion_once(system, user, max_tokens, timeout, max_retries)
+        open_reason = getattr(self, "_circuit_open_reason", None)
+        if open_reason:
+            raise LLMCircuitOpenError(open_reason)
+        try:
+            content = self._chat_completion_once(system, user, max_tokens, timeout, max_retries)
+        except Exception as exc:
+            self._register_call_failure(exc)
+            raise
+        self._consecutive_connection_failures = 0
+        return content
+
+    def _register_call_failure(self, exc: BaseException) -> None:
+        reason = classify_llm_error(exc)
+        if reason not in CIRCUIT_BREAKER_REASONS:
+            # 연결은 됐지만 다른 이유(429 소진, 5xx 등)로 실패 — 연속 연결 실패가 아니다.
+            self._consecutive_connection_failures = 0
+            return
+        count = int(getattr(self, "_consecutive_connection_failures", 0)) + 1
+        self._consecutive_connection_failures = count
+        if count >= CIRCUIT_BREAKER_THRESHOLD:
+            self._circuit_open_reason = reason
+            logger.warning(
+                "%s circuit breaker opened after %s consecutive failures (%s); remaining calls use fallback",
+                self.provider_label,
+                count,
+                type(exc).__name__,
+            )
+            self._record_fallback_warning(f"AI 연결 문제로 이후 장면은 대체 내용으로 생성했습니다 (원인: {reason})")
+
+    def _chat_completion_once(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+    ) -> str:
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
@@ -436,15 +697,39 @@ class OpenAILLMProvider(LLMProvider):
             "response_format": {"type": "json_object"},
             "max_tokens": max_tokens,
         }
-        with httpx.Client(timeout=60) as client:
-            response = client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-        return parse_json_object(content)
+        reasoning_effort = getattr(self, "reasoning_effort", None)
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+        retries = max(0, int(max_retries if max_retries is not None else _setting("llm_max_retries", 3)))
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+
+        with build_http_client(timeout) as client:
+            attempt = 0
+            transport_retries = 0
+            while True:
+                try:
+                    response = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
+                except httpx.TransportError as exc:
+                    # SSL 검증 실패·잘못된 URL 등은 재시도해도 결과가 같으니 바로 올린다.
+                    retryable = isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError))
+                    if (
+                        attempt >= retries
+                        or transport_retries >= MAX_TRANSPORT_RETRIES
+                        or not retryable
+                        or _is_ssl_error(exc)
+                    ):
+                        raise
+                    transport_retries += 1
+                    wait = _backoff_seconds(attempt)
+                    logger.warning("%s request failed (%s); retrying in %.1fs", self.provider_label, type(exc).__name__, wait)
+                else:
+                    if response.status_code not in RETRYABLE_STATUS_CODES or attempt >= retries:
+                        response.raise_for_status()
+                        return extract_message_content(response)
+                    wait = _backoff_seconds(attempt, response)
+                    logger.warning("%s returned HTTP %s; retrying in %.1fs", self.provider_label, response.status_code, wait)
+                _sleep(wait)
+                attempt += 1
 
 
 SCENE_SYSTEM_PROMPT = (
@@ -485,6 +770,22 @@ def format_segments(segments: list[TranscriptSegment], max_chars: int) -> str:
     return "\n".join(lines)
 
 
+def extract_message_content(response: httpx.Response) -> str:
+    try:
+        choice = response.json()["choices"][0]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise LLMResponseFormatError("chat completion response did not contain choices") from exc
+    if not isinstance(choice, dict):
+        raise LLMResponseFormatError("chat completion choice was not an object")
+    if choice.get("finish_reason") == "length":
+        raise LLMResponseTruncatedError("chat completion was truncated at max_tokens")
+    message = choice.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise LLMResponseFormatError("chat completion message content was empty")
+    return content
+
+
 def parse_json_object(content: str) -> dict[str, Any]:
     try:
         value = json.loads(content)
@@ -515,33 +816,36 @@ def fill_missing_scene_summaries(windows: list[dict], parsed: SceneWindowSummary
     return SceneWindowSummaryList(scenes=scenes)
 
 
-def clean_scene_summaries(summary_list: SceneWindowSummaryList) -> SceneWindowSummaryList:
+def clean_scene_summaries(summary_list: SceneWindowSummaryList, apply_corrections: bool) -> SceneWindowSummaryList:
     return SceneWindowSummaryList(
         scenes=[
             SceneWindowSummary(
                 id=scene.id,
-                title=correct_common_transcript_terms(scene.title),
-                summary=correct_common_transcript_terms(scene.summary),
+                title=correct_common_transcript_terms(scene.title, apply_corrections),
+                summary=correct_common_transcript_terms(scene.summary, apply_corrections),
             )
             for scene in summary_list.scenes
         ]
     )
 
 
-def clean_lesson_content(content: LessonContent) -> LessonContent:
+def clean_lesson_content(content: LessonContent, apply_corrections: bool) -> LessonContent:
+    def fix(text: str) -> str:
+        return correct_common_transcript_terms(text, apply_corrections)
+
     data = content.model_dump()
-    data["title"] = correct_common_transcript_terms(data["title"])
-    data["overview"] = correct_common_transcript_terms(data["overview"])
-    data["learning_objectives"] = [correct_common_transcript_terms(item) for item in data["learning_objectives"]]
-    data["final_summary"] = [correct_common_transcript_terms(item) for item in data["final_summary"]]
-    data["review_questions"] = [correct_common_transcript_terms(item) for item in data["review_questions"]]
+    data["title"] = fix(data["title"])
+    data["overview"] = fix(data["overview"])
+    data["learning_objectives"] = [fix(item) for item in data["learning_objectives"]]
+    data["final_summary"] = [fix(item) for item in data["final_summary"]]
+    data["review_questions"] = [fix(item) for item in data["review_questions"]]
     for chapter in data["chapters"]:
         for key in ["title", "explanation", "beginner_explanation", "timestamp", "summary"]:
-            chapter[key] = correct_common_transcript_terms(chapter[key])
-        chapter["learning_objectives"] = [correct_common_transcript_terms(item) for item in chapter["learning_objectives"]]
-        chapter["key_points"] = [correct_common_transcript_terms(item) for item in chapter["key_points"]]
+            chapter[key] = fix(chapter[key])
+        chapter["learning_objectives"] = [fix(item) for item in chapter["learning_objectives"]]
+        chapter["key_points"] = [fix(item) for item in chapter["key_points"]]
         chapter["terms"] = [
-            {term_key: correct_common_transcript_terms(term_value) for term_key, term_value in term.items()}
+            {"term": fix(term.get("term", "")), "definition": fix(term.get("definition", ""))}
             for term in chapter["terms"]
         ]
     return LessonContent.model_validate(data)

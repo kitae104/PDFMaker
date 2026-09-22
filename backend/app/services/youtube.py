@@ -5,8 +5,19 @@ from pathlib import Path
 
 import httpx
 
+from app.core.exceptions import AppError
 from app.schemas.pipeline import TranscriptData
 from app.services.transcript_parser import parse_vtt
+
+YOUTUBE_TRANSCRIPT_UNAVAILABLE_MESSAGE = (
+    "YouTube 자막을 가져오지 못했습니다. 서버 IP가 YouTube에 차단됐거나 자막이 없는 영상일 수 있습니다. "
+    "자막 파일(SRT/VTT)을 내려받아 '자막' 입력으로 올려 주세요."
+)
+
+
+class YouTubeTranscriptUnavailableError(AppError):
+    def __init__(self, message: str = YOUTUBE_TRANSCRIPT_UNAVAILABLE_MESSAGE):
+        super().__init__(message, 422)
 
 
 def extract_youtube_id(url: str) -> str | None:
@@ -76,17 +87,23 @@ def extract_youtube_info(url: str) -> dict:
         return ydl.extract_info(url, download=False)
 
 
-def fetch_youtube_transcript(url: str) -> TranscriptData | None:
-    info = extract_youtube_info(url)
-    caption = pick_caption(info)
-    if not caption:
-        return None
-    response = httpx.get(caption["url"], timeout=12)
-    response.raise_for_status()
-    text = clean_vtt(response.text)
-    transcript = parse_vtt(text)
+def fetch_youtube_transcript(url: str) -> TranscriptData:
+    """Fetch a real caption transcript or raise YouTubeTranscriptUnavailableError."""
+    try:
+        info = extract_youtube_info(url)
+        caption = pick_caption(info)
+        if not caption:
+            raise YouTubeTranscriptUnavailableError()
+        response = httpx.get(caption["url"], timeout=12)
+        response.raise_for_status()
+        text = clean_vtt(response.text)
+        transcript = parse_vtt(text)
+    except YouTubeTranscriptUnavailableError:
+        raise
+    except Exception as exc:
+        raise YouTubeTranscriptUnavailableError() from exc
     if not transcript.segments:
-        return None
+        raise YouTubeTranscriptUnavailableError()
     language = caption.get("language") or caption.get("name") or "auto"
     transcript.language = str(language)[:16]
     return transcript
@@ -120,28 +137,59 @@ def download_youtube_video(url: str, output_dir: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
+PREFERRED_CAPTION_LANGS = ["ko", "ko-KR", "en", "en-US", "en-GB"]
+
+
 def pick_caption(info: dict) -> dict | None:
-    caption_sets = [info.get("subtitles") or {}, info.get("automatic_captions") or {}]
-    preferred_langs = ["ko", "ko-KR", "en", "en-US"]
-    for captions in caption_sets:
-        for lang in preferred_langs:
-            chosen = choose_vtt(captions.get(lang) or [])
-            if chosen:
-                return {**chosen, "language": lang}
-        for lang, entries in captions.items():
-            chosen = choose_vtt(entries or [])
-            if chosen:
-                return {**chosen, "language": lang}
+    """Choose a VTT caption track.
+
+    Manual subtitles win. For automatic captions only the original-language track is used
+    ("<lang>-orig" or the video's own language); YouTube machine translations are skipped.
+    Non-VTT tracks are never chosen because the parser only understands VTT.
+    """
+    original_lang = str(info.get("language") or "").strip()
+    manual = info.get("subtitles") or {}
+    manual_order = unique_list([*PREFERRED_CAPTION_LANGS, original_lang, *manual.keys()])
+    for lang in manual_order:
+        if lang == "live_chat":
+            continue
+        chosen = choose_vtt(manual.get(lang) or [])
+        if chosen:
+            return {**chosen, "language": lang}
+
+    automatic = info.get("automatic_captions") or {}
+    orig_keys = [key for key in automatic if key.endswith("-orig")]
+    auto_order = unique_list([*orig_keys, original_lang])
+    for lang in auto_order:
+        if not lang:
+            continue
+        chosen = choose_vtt(automatic.get(lang) or [], allow_translated=False)
+        if chosen:
+            return {**chosen, "language": lang.removesuffix("-orig")}
     return None
 
 
-def choose_vtt(entries: list[dict]) -> dict | None:
+def unique_list(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def is_translated_caption(entry: dict) -> bool:
+    return "tlang=" in str(entry.get("url") or "")
+
+
+def choose_vtt(entries: list[dict], allow_translated: bool = True) -> dict | None:
     for entry in entries:
-        if entry.get("ext") == "vtt" and entry.get("url"):
-            return entry
-    for entry in entries:
-        if entry.get("url"):
-            return entry
+        if entry.get("ext") != "vtt" or not entry.get("url"):
+            continue
+        if not allow_translated and is_translated_caption(entry):
+            continue
+        return entry
     return None
 
 
